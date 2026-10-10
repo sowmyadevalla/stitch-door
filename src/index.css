@@ -1,0 +1,47 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-ivory-100 text-charcoal-800 font-sans antialiased;
+  }
+  h1, h2, h3 {
+    @apply font-serif;
+  }
+  ::selection {
+    @apply bg-forest-200 text-forest-900;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-ivory-100 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-forest-600 text-ivory-50 hover:bg-forest-700 focus:ring-forest-400 shadow-soft hover:shadow-card;
+  }
+  .btn-secondary {
+    @apply btn bg-ivory-50 text-forest-700 border border-forest-200 hover:bg-forest-50 focus:ring-forest-400;
+  }
+  .btn-accent {
+    @apply btn bg-terracotta-500 text-ivory-50 hover:bg-terracotta-600 focus:ring-terracotta-400 shadow-soft hover:shadow-card;
+  }
+  .btn-ghost {
+    @apply btn text-charcoal-600 hover:bg-ivory-200 focus:ring-charcoal-300;
+  }
+  .input-field {
+    @apply w-full rounded-xl border border-charcoal-200 bg-ivory-50 px-4 py-3 text-sm text-charcoal-800 placeholder-charcoal-400 transition-all duration-200 focus:border-forest-400 focus:outline-none focus:ring-2 focus:ring-forest-200;
+  }
+  .label-field {
+    @apply mb-1.5 block text-sm font-medium text-charcoal-700;
+  }
+  .card {
+    @apply rounded-2xl bg-ivory-50 shadow-card transition-all duration-300;
+  }
+}
