@@ -191,6 +191,37 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
       });
       if (historyError) throw new Error('Failed to create status history.');
 
+      // Fire notification to admin (edge function — non-blocking, best-effort)
+      try {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        await fetch(`${supabaseUrl}/functions/v1/new-booking-notification`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            record: {
+              id: bookingId,
+              booking_reference: reference,
+              customer_name: customer.name.trim(),
+              customer_phone: phoneNormalized,
+              customer_email: customer.email.trim(),
+              pickup_address: customer.address.trim(),
+              locality: customer.locality.trim(),
+              pin_code: customer.pin_code.trim(),
+              preferred_pickup_date: customer.pickup_date || null,
+              preferred_pickup_window: customer.pickup_window,
+              additional_instructions: customer.instructions.trim(),
+              estimated_total: total,
+            },
+          }),
+        });
+      } catch {
+        // Notification failure should not block the booking confirmation
+      }
+
       setBookingRef(reference);
       setStep(4);
     } catch (err) {
