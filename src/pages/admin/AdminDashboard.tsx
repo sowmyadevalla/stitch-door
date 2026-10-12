@@ -13,10 +13,50 @@ export function AdminDashboard() {
   const { session, isAdmin, loading, signOut } = useAuth();
   const { navigate } = useRouter();
   const [tab, setTab] = useState<AdminTab>('overview');
+  const [toast, setToast] = useState<{ ref: string; name: string } | null>(null);
 
   useEffect(() => {
     if (!loading && (!session || !isAdmin)) navigate('/admin-login');
   }, [session, isAdmin, loading, navigate]);
+
+  // Realtime: listen for new bookings and show a toast + browser notification
+  useEffect(() => {
+    if (!session || !isAdmin) return;
+
+    const channel = supabase
+      .channel('new-bookings')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'bookings' },
+        (payload: any) => {
+          const b = payload.new as Booking;
+          setToast({ ref: b.booking_reference, name: b.customer_name });
+
+          // Browser notification (if permission granted)
+          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            new Notification('New StitchDoor Booking!', {
+              body: `${b.customer_name} — ${b.booking_reference}`,
+            });
+          }
+
+          // Auto-dismiss toast after 8 seconds
+          setTimeout(() => setToast(null), 8000);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session, isAdmin]);
+
+  // Request notification permission on mount
+  useEffect(() => {
+    if (!session || !isAdmin) return;
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, [session, isAdmin]);
 
   if (loading) {
     return (
@@ -37,6 +77,30 @@ export function AdminDashboard() {
 
   return (
     <div className="animate-fade-in min-h-screen bg-ivory-200">
+      {/* Real-time toast notification */}
+      {toast && (
+        <div className="fixed top-4 right-4 z-50 animate-fade-in">
+          <div className="flex items-center gap-3 rounded-xl bg-forest-700 px-5 py-4 text-ivory-50 shadow-elevated">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-terracotta-500">
+              <Bell className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold">New Booking Received!</p>
+              <p className="text-xs text-ivory-200">{toast.name} — {toast.ref}</p>
+            </div>
+            <button
+              onClick={() => { setToast(null); setTab('bookings'); }}
+              className="ml-4 rounded-lg bg-ivory-50 px-3 py-1.5 text-xs font-medium text-forest-700 hover:bg-ivory-200"
+            >
+              View
+            </button>
+            <button onClick={() => setToast(null)} className="text-ivory-300 hover:text-ivory-50">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="mx-auto max-w-7xl px-4 py-6 lg:px-8">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-semibold text-charcoal-900">Admin Dashboard</h1>
@@ -106,9 +170,28 @@ function OverviewTab() {
 
   useEffect(() => {
     loadData();
-    // Auto-refresh every 30 seconds so new orders appear without manual reload
+    // Auto-refresh every 30 seconds as fallback
     const interval = setInterval(loadData, 30000);
-    return () => clearInterval(interval);
+
+    // Realtime: refresh immediately when a new booking is inserted
+    const channel = supabase
+      .channel('overview-bookings')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'bookings' },
+        () => loadData()
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'bookings' },
+        () => loadData()
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   if (loading) return <div className="py-12 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-forest-600" /></div>;
