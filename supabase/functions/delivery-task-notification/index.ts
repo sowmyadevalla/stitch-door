@@ -129,3 +129,5 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+// verify_jwt=true set in config.toml Phase 1

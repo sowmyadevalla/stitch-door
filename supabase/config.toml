@@ -1,11 +1,11 @@
 [functions.new-booking-notification]
-verify_jwt = false
+verify_jwt = true
 
 [functions.booking-photo-access]
 verify_jwt = false
 
 [functions.partner-offer-notification]
-verify_jwt = false
+verify_jwt = true
 
 [functions.delivery-task-notification]
-verify_jwt = false
+verify_jwt = true

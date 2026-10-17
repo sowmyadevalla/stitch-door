@@ -415,9 +415,11 @@ function AssignTaskModal({ task, agents, onClose, onDone }: {
     // Best-effort notification; never blocks the assignment.
     let notifyText = '';
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const jwt = sessionData.session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delivery-task-notification`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
         body: JSON.stringify({ task_id: task.id }),
       });
       const json = await res.json().catch(() => null) as { notified?: boolean; detail?: string } | null;
