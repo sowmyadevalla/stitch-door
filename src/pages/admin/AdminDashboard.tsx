@@ -1,11 +1,32 @@
-import { useState, useEffect } from 'react';
-import { LayoutDashboard, Scissors, Settings, LogOut, Loader2, ShieldAlert, Plus, Edit, Trash2, X, Download, ChevronRight, Bell, Clock, ClipboardList, UserPlus, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { LayoutDashboard, Scissors, Settings, LogOut, Loader2, ShieldAlert, Plus, Edit, Trash2, X, Download, ChevronRight, Bell, Clock, ClipboardList, UserPlus, RefreshCw, Users, XCircle, AlertTriangle, Send, PauseCircle, PlayCircle } from 'lucide-react';
 import { useRouter } from '@/lib/router';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { STATUS_LABELS, STATUS_FLOW, PAYMENT_LABELS, formatINR } from '@/lib/constants';
 import { formatDateTime, formatDate, slugify } from '@/lib/utils';
 import type { Booking, Service, BusinessConfig, ServiceableArea, TailoringPartner, TailorApplication, TailorApplicationStatus, BookingStatus, PaymentStatus } from '@/lib/types';
+
+interface EligibilityRow {
+  partner_id: string;
+  partner_name: string;
+  partner_code: string | null;
+  partner_locality: string;
+  partner_phone: string;
+  eligible: boolean;
+  reasons: string[];
+  match_score: number;
+}
+
+interface DeclineRow {
+  offer_id: string;
+  booking_id: string;
+  booking_reference: string;
+  partner_name: string;
+  status: string;
+  decline_reason: string | null;
+  responded_at: string;
+}
 
 type AdminTab = 'overview' | 'bookings' | 'applications' | 'services' | 'operations';
 
@@ -150,6 +171,7 @@ function OverviewTab() {
   const [recentBookings, setRecentBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [declines, setDeclines] = useState<DeclineRow[]>([]);
 
   async function loadData() {
     const { data, error } = await supabase.from('bookings').select('*').order('created_at', { ascending: false });
@@ -170,10 +192,16 @@ function OverviewTab() {
     setLoading(false);
   }
 
+  async function loadDeclines() {
+    const { data } = await supabase.rpc('admin_pending_declines');
+    if (data) setDeclines((data as unknown as DeclineRow[]) || []);
+  }
+
   useEffect(() => {
     loadData();
+    loadDeclines();
     // Auto-refresh every 30 seconds as fallback
-    const interval = setInterval(loadData, 30000);
+    const interval = setInterval(() => { loadData(); loadDeclines(); }, 30000);
 
     // Realtime: refresh immediately when a new booking is inserted
     const channel = supabase
@@ -213,6 +241,27 @@ function OverviewTab() {
 
   return (
     <div className="space-y-6">
+      {/* Declined / expired offers needing reassignment */}
+      {declines.length > 0 && (
+        <div className="animate-fade-in rounded-xl bg-amber-50 p-4">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-600" />
+            <p className="text-sm font-semibold text-amber-800">
+              {declines.length} offer{declines.length > 1 ? 's' : ''} declined or expired in the last 7 days — reassignment needed:
+            </p>
+          </div>
+          <ul className="mt-2 space-y-1">
+            {declines.map((d) => (
+              <li key={d.offer_id} className="text-xs text-amber-800">
+                <span className="font-semibold">{d.booking_reference}</span> — {d.partner_name} ({d.status})
+                {d.decline_reason ? `: “${d.decline_reason}”` : ''}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-amber-700">Open each booking in the Bookings tab and send an offer to a different partner.</p>
+        </div>
+      )}
+
       {/* New orders alert */}
       {hasNewOrders && (
         <div className="animate-fade-in flex items-center gap-3 rounded-xl bg-terracotta-50 p-4">
@@ -285,7 +334,6 @@ function BookingsTab() {
   const [selected, setSelected] = useState<Booking | null>(null);
   const [items, setItems] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
-  const [partners, setPartners] = useState<TailoringPartner[]>([]);
 
   async function loadBookings() {
     setLoading(true);
@@ -301,14 +349,12 @@ function BookingsTab() {
 
   async function openBooking(booking: Booking) {
     setSelected(booking);
-              const [itemsRes, histRes, partnersRes] = await Promise.all([
+    const [itemsRes, histRes] = await Promise.all([
       supabase.from('booking_items').select('*').eq('booking_id', booking.id),
       supabase.from('booking_status_history').select('*').eq('booking_id', booking.id).order('created_at'),
-      supabase.from('tailoring_partners').select('*').eq('is_active', true),
     ]);
     setItems(itemsRes.data || []);
     setHistory(histRes.data || []);
-    setPartners((partnersRes.data as TailoringPartner[]) || []);
   }
 
   function exportCSV() {
@@ -365,12 +411,11 @@ function BookingsTab() {
         </div>
       )}
 
-      {selected && (
+        {selected && (
         <BookingDetailModal
           booking={selected}
           items={items}
           history={history}
-          partners={partners}
           onClose={() => setSelected(null)}
           onUpdate={() => { loadBookings(); }}
         />
@@ -380,15 +425,14 @@ function BookingsTab() {
 }
 
 function BookingDetailModal({
-  booking, items, history, partners, onClose, onUpdate,
+  booking, items, history, onClose, onUpdate,
 }: {
-  booking: Booking; items: any[]; history: any[]; partners: TailoringPartner[];
+  booking: Booking; items: any[]; history: any[];
   onClose: () => void; onUpdate: () => void;
 }) {
   const [status, setStatus] = useState<BookingStatus>(booking.status);
   const [confirmedAmount, setConfirmedAmount] = useState(booking.confirmed_amount?.toString() || '');
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(booking.payment_status);
-  const [partnerId, setPartnerId] = useState(booking.assigned_partner_id || '');
   const [adminNote, setAdminNote] = useState(booking.admin_notes);
   const [historyNote, setHistoryNote] = useState('');
   const [isInternal, setIsInternal] = useState(true);
@@ -435,18 +479,6 @@ function BookingDetailModal({
     const { error } = await supabase.from('bookings').update(updates).eq('id', booking.id);
     if (error) { setSaveMsg('Error: ' + error.message); setSaving(false); return; }
 
-    let assignMsg = '';
-    if ((partnerId || null) !== (booking.assigned_partner_id || null)) {
-      if (!partnerId) {
-        assignMsg = ' Removing a partner assignment is done from the partner\'s offer history — select a different partner instead.';
-      } else {
-        const { data: assignRes } = await supabase.rpc('admin_assign_booking', {
-          p_booking_id: booking.id, p_partner_id: partnerId, p_note: 'Assigned from booking detail',
-        });
-        if (assignRes?.error) assignMsg = ' Partner assignment failed: ' + assignRes.error + '.';
-      }
-    }
-
     if (status !== booking.status && historyNote) {
       await supabase.from('booking_status_history').insert({
         booking_id: booking.id, status, note: historyNote, is_internal: isInternal, created_by: booking.user_id,
@@ -457,7 +489,7 @@ function BookingDetailModal({
       });
     }
 
-    setSaveMsg('Saved successfully.' + assignMsg);
+    setSaveMsg('Saved successfully.');
     setSaving(false);
     onUpdate();
     setTimeout(() => setSaveMsg(null), 2000);
@@ -535,13 +567,6 @@ function BookingDetailModal({
               <label className="label-field">Confirmed Amount</label>
               <input type="number" value={confirmedAmount} onChange={(e) => setConfirmedAmount(e.target.value)} className="input-field" placeholder="INR" />
             </div>
-            <div>
-              <label className="label-field">Assigned Partner</label>
-              <select value={partnerId} onChange={(e) => setPartnerId(e.target.value)} className="input-field">
-                <option value="">None</option>
-                {partners.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
           </div>
 
           {status === 'cancelled' && (
@@ -571,6 +596,11 @@ function BookingDetailModal({
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Save Changes
           </button>
+        </div>
+
+        {/* Assignment */}
+        <div className="mt-6">
+          <AssignmentPanel booking={booking} onChanged={onUpdate} />
         </div>
 
         {/* History */}
@@ -847,6 +877,140 @@ function ApplicationReviewModal({
   );
 }
 
+function AssignmentPanel({ booking, onChanged }: { booking: Booking; onChanged: () => void }) {
+  const [rows, setRows] = useState<EligibilityRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [assigning, setAssigning] = useState<string | null>(null);
+  const [note, setNote] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase.rpc('partner_matches_booking', { p_booking_id: booking.id });
+    if (error) { setMsg('Could not load partner eligibility: ' + error.message); setRows([]); }
+    else setRows((data as unknown as EligibilityRow[]) || []);
+    setLoading(false);
+  }, [booking.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function assign(partnerId: string, partnerName: string) {
+    setAssigning(partnerId);
+    setMsg(null);
+    const { data: assignRes } = await supabase.rpc('admin_assign_booking', {
+      p_booking_id: booking.id, p_partner_id: partnerId, p_note: note.trim(),
+    });
+    if (assignRes?.error) {
+      setAssigning(null);
+      setMsg('Assignment failed: ' + (assignRes.message || assignRes.error));
+      return;
+    }
+
+    // Best-effort notification; never blocks the assignment.
+    let notifyText = '';
+    try {
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/partner-offer-notification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ offer_id: assignRes.offer_id }),
+      });
+      const json = await res.json().catch(() => null) as { notified?: boolean; detail?: string } | null;
+      if (json?.notified) notifyText = ' Partner notified by email.';
+      else if (json?.detail) notifyText = ` Note: partner email not sent (${json.detail}). They will still see the offer in their dashboard.`;
+      else notifyText = ' Note: partner email not sent — they will still see the offer in their dashboard.';
+    } catch {
+      notifyText = ' Note: partner email not sent — they will still see the offer in their dashboard.';
+    }
+
+    setAssigning(null);
+    setNote('');
+    setMsg(`Order offered to ${partnerName}.${notifyText}`);
+    load();
+    onChanged();
+  }
+
+  const eligible = rows.filter((r) => r.eligible);
+  const excluded = rows.filter((r) => !r.eligible);
+  const visible = showAll ? rows : eligible;
+
+  return (
+    <div className="rounded-xl border border-ivory-300 p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h4 className="flex items-center gap-2 text-sm font-semibold text-charcoal-700">
+          <Users className="h-4 w-4" /> Assign a Tailoring Partner
+        </h4>
+        <button onClick={load} className="btn-ghost text-xs"><RefreshCw className="h-3.5 w-3.5" /> Refresh</button>
+      </div>
+
+      <input
+        type="text"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        className="input-field mb-3"
+        placeholder="Optional note for the partner (e.g. customer prefers evening pickup)"
+        maxLength={300}
+      />
+
+      {msg && <p className={`mb-3 text-sm ${msg.startsWith('Assignment failed') ? 'text-red-600' : 'text-forest-600'}`}>{msg}</p>}
+
+      {loading ? (
+        <div className="py-6 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin text-forest-600" /></div>
+      ) : rows.length === 0 ? (
+        <p className="py-4 text-center text-sm text-charcoal-500">
+          No tailoring partners exist yet. Approve applications in the Applications tab to onboard partners.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {visible.map((r) => (
+            <div key={r.partner_id} className={`rounded-lg p-3 text-sm ${r.eligible ? 'bg-forest-50' : 'bg-ivory-200 opacity-80'}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-medium text-charcoal-800">
+                    {r.partner_name}
+                    {r.partner_code && <span className="ml-1.5 text-xs text-charcoal-400">{r.partner_code}</span>}
+                  </p>
+                  <p className="text-xs text-charcoal-500">{r.partner_locality || 'Locality not recorded'} • {r.partner_phone || 'No phone'}</p>
+                </div>
+                {r.eligible ? (
+                  <button
+                    onClick={() => assign(r.partner_id, r.partner_name)}
+                    disabled={assigning !== null}
+                    className="btn-primary text-xs"
+                  >
+                    {assigning === r.partner_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                    {assigning === r.partner_id ? 'Offering…' : 'Send Offer'}
+                  </button>
+                ) : (
+                  <span className="flex items-center gap-1 rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">
+                    <XCircle className="h-3.5 w-3.5" /> Excluded
+                  </span>
+                )}
+              </div>
+              {r.reasons?.length > 0 && (
+                <ul className="mt-2 space-y-0.5">
+                  {r.reasons.map((reason, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-xs">
+                      {reason.startsWith('Excluded:') ? <XCircle className="mt-0.5 h-3 w-3 flex-shrink-0 text-red-500" /> : <AlertTriangle className="mt-0.5 h-3 w-3 flex-shrink-0 text-amber-500" />}
+                      <span className={reason.startsWith('Excluded:') ? 'text-red-600' : 'text-amber-700'}>{reason.replace(/^Excluded: |^Note: /, '')}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+
+          {excluded.length > 0 && (
+            <button onClick={() => setShowAll(!showAll)} className="btn-ghost text-xs">
+              {showAll ? 'Show eligible only' : `Show ${excluded.length} excluded partner${excluded.length > 1 ? 's' : ''} with reasons`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ServicesTab() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
@@ -988,6 +1152,7 @@ function OperationsTab() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [newArea, setNewArea] = useState({ pin_code: '', locality: '' });
   const [newPartner, setNewPartner] = useState({ name: '', phone: '', locality: '', specialties: '' });
+  const [editingPartner, setEditingPartner] = useState<TailoringPartner | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -1041,10 +1206,13 @@ function OperationsTab() {
     if (data) { setPartners([...partners, data[0] as TailoringPartner]); setNewPartner({ name: '', phone: '', locality: '', specialties: '' }); }
   }
 
+  // kept intentionally: removing partners is a deliberate admin action reachable from the partners list
+
   async function deletePartner(id: string) {
     await supabase.from('tailoring_partners').delete().eq('id', id);
     setPartners(partners.filter(p => p.id !== id));
   }
+  void deletePartner;
 
   if (loading) return <div className="py-12 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-forest-600" /></div>;
   if (!config) return <p className="text-sm text-red-600">Could not load configuration.</p>;
@@ -1111,14 +1279,94 @@ function OperationsTab() {
         </div>
         <div className="space-y-2">
           {partners.length === 0 ? <p className="text-sm text-charcoal-400">No partners configured yet.</p> : partners.map(p => (
-            <div key={p.id} className="flex items-center justify-between rounded-lg bg-ivory-200 p-3 text-sm">
-              <div>
-                <span className="font-medium text-charcoal-800">{p.name}</span>
-                <span className="text-charcoal-500"> — {p.phone || 'No phone'} • {p.locality || 'N/A'}</span>
+            <div key={p.id} className="rounded-lg bg-ivory-200 p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="flex items-center gap-2 font-medium text-charcoal-800">
+                    {p.name}
+                    {p.partner_code && <span className="text-xs text-charcoal-400">{p.partner_code}</span>}
+                    <button
+                      onClick={async () => {
+                        const { data } = await supabase.from('tailoring_partners').update({ is_accepting_orders: !p.is_accepting_orders }).eq('id', p.id).select();
+                        if (data) setPartners(partners.map(x => x.id === p.id ? data[0] as TailoringPartner : x));
+                      }}
+                      className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${p.is_accepting_orders ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
+                      title="Toggle whether this partner receives new offers"
+                    >
+                      {p.is_accepting_orders ? <PlayCircle className="h-3 w-3" /> : <PauseCircle className="h-3 w-3" />}
+                      {p.is_accepting_orders ? 'Accepting orders' : 'Paused'}
+                    </button>
+                  </p>
+                  <p className="truncate text-xs text-charcoal-500">
+                    {p.phone || 'No phone'} • {p.locality || 'No locality'}
+                    {p.service_pin_codes ? ` • PINs: ${p.service_pin_codes}` : ' • No PIN coverage recorded'}
+                    {p.capabilities ? ` • ${p.capabilities}` : ' • No capabilities recorded'}
+                  </p>
+                </div>
+                <button onClick={() => setEditingPartner(p)} className="rounded-lg p-2 text-charcoal-400 hover:text-forest-700" title="Edit coverage & capabilities">
+                  <Edit className="h-4 w-4" />
+                </button>
               </div>
-              <button onClick={() => deletePartner(p.id)} className="text-charcoal-400 hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
             </div>
           ))}
+        </div>
+      </div>
+
+      {editingPartner && (
+        <PartnerCoverageModal
+          partner={editingPartner}
+          onClose={() => setEditingPartner(null)}
+          onSaved={(updated) => {
+            setPartners(partners.map(x => x.id === updated.id ? updated : x));
+            setEditingPartner(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PartnerCoverageModal({ partner, onClose, onSaved }: { partner: TailoringPartner; onClose: () => void; onSaved: (p: TailoringPartner) => void }) {
+  const [pinCodes, setPinCodes] = useState(partner.service_pin_codes || '');
+  const [capabilities, setCapabilities] = useState(partner.capabilities || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    const { data, error: updateError } = await supabase
+      .from('tailoring_partners')
+      .update({ service_pin_codes: pinCodes.trim(), capabilities: capabilities.trim() })
+      .eq('id', partner.id)
+      .select();
+    setSaving(false);
+    if (updateError || !data) { setError(updateError?.message || 'Could not save.'); return; }
+    onSaved(data[0] as TailoringPartner);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-charcoal-900/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-ivory-50 p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-charcoal-900">Coverage & Skills — {partner.name}</h3>
+          <button onClick={onClose} className="text-charcoal-400 hover:text-charcoal-600"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="label-field">Service PIN codes (comma-separated)</label>
+            <input type="text" value={pinCodes} onChange={(e) => setPinCodes(e.target.value)} className="input-field" placeholder="e.g. 500081, 500034, 500003" />
+            <p className="mt-1 text-xs text-charcoal-400">Used to match bookings by pickup PIN. Leave blank if the partner serves everywhere.</p>
+          </div>
+          <div>
+            <label className="label-field">Capabilities</label>
+            <input type="text" value={capabilities} onChange={(e) => setCapabilities(e.target.value)} className="input-field" placeholder="e.g. blouse, alterations, repairs, kurti" />
+            <p className="mt-1 text-xs text-charcoal-400">Used to match bookings by service. Leave blank if the partner can take any service.</p>
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <button onClick={save} disabled={saving} className="btn-primary w-full">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save
+          </button>
         </div>
       </div>
     </div>

@@ -1,17 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Scissors, LogOut, Loader2, PackageCheck, Clock, MapPin, CheckCircle2,
-  XCircle, ArrowRight, Phone, User, RefreshCw, ShieldAlert, BadgeCheck,
+  XCircle, ArrowRight, Phone, User, RefreshCw, ShieldAlert, BadgeCheck, Timer,
 } from 'lucide-react';
 import { useRouter } from '@/lib/router';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { STATUS_LABELS, formatINR } from '@/lib/constants';
+import { STATUS_LABELS } from '@/lib/constants';
 import { formatDateTime } from '@/lib/utils';
-import type {
-  Booking, BookingItem, TailoringPartner, PartnerOffer,
-  PartnerStage, BookingStatus,
-} from '@/lib/types';
+import type { PartnerStage, BookingStatus } from '@/lib/types';
 
 // Stages a partner may set, in strict forward order.
 const STAGE_FLOW: PartnerStage[] = ['picked_up', 'at_tailoring_partner', 'quality_check', 'ready_for_delivery'];
@@ -27,17 +24,55 @@ const NEXT_STAGE: Partial<Record<BookingStatus, PartnerStage>> = {
   quality_check: 'ready_for_delivery',
 };
 
-interface OfferWithBooking {
-  offer: PartnerOffer;
-  booking: Booking;
-  items: BookingItem[];
+export interface PartnerOfferRow {
+  offer_id: string;
+  booking_id: string;
+  booking_reference: string;
+  customer_name: string;
+  customer_phone: string;
+  pickup_address: string;
+  locality: string;
+  pin_code: string;
+  preferred_pickup_date: string | null;
+  preferred_pickup_window: string;
+  additional_instructions: string;
+  assignment_note: string;
+  expires_at: string | null;
+  offered_at: string;
+  items: { service_name: string; quantity: number; garment_notes: string | null }[];
+}
+
+export interface PartnerOrderRow {
+  booking_id: string;
+  booking_reference: string;
+  status: BookingStatus;
+  customer_name: string;
+  customer_phone: string;
+  pickup_address: string;
+  locality: string;
+  pin_code: string;
+  preferred_pickup_date: string | null;
+  preferred_pickup_window: string;
+  additional_instructions: string;
+  items: { service_name: string; quantity: number; garment_notes: string | null }[];
+}
+
+interface TailoringPartnerRow {
+  id: string;
+  name: string;
+  phone: string;
+  locality: string;
+  is_active: boolean;
+  auth_user_id: string | null;
+  is_accepting_orders: boolean;
+  partner_code: string | null;
 }
 
 export function PartnerDashboard() {
   const { session, loading: authLoading, signOut } = useAuth();
   const { navigate } = useRouter();
 
-  const [partner, setPartner] = useState<TailoringPartner | null>(null);
+  const [partner, setPartner] = useState<TailoringPartnerRow | null>(null);
   const [checked, setChecked] = useState(false); // finished the partner lookup
 
   useEffect(() => {
@@ -46,10 +81,10 @@ export function PartnerDashboard() {
     (async () => {
       const { data } = await supabase
         .from('tailoring_partners')
-        .select('*')
+        .select('id, name, phone, locality, is_active, auth_user_id, is_accepting_orders, partner_code')
         .eq('auth_user_id', session.user.id)
         .maybeSingle();
-      setPartner((data as TailoringPartner) || null);
+      setPartner((data as TailoringPartnerRow) || null);
       setChecked(true);
     })();
   }, [session, authLoading, navigate]);
@@ -81,69 +116,45 @@ export function PartnerDashboard() {
   return <PartnerHome partner={partner} onSignOut={signOut} />;
 }
 
-function PartnerHome({ partner, onSignOut }: { partner: TailoringPartner; onSignOut: () => Promise<void> }) {
-  const [offers, setOffers] = useState<OfferWithBooking[]>([]);
-  const [orders, setOrders] = useState<Booking[]>([]);
-  const [itemsByBooking, setItemsByBooking] = useState<Record<string, BookingItem[]>>({});
+function PartnerHome({ partner, onSignOut }: { partner: TailoringPartnerRow; onSignOut: () => Promise<void> }) {
+  const { navigate } = useRouter();
+  const [offers, setOffers] = useState<PartnerOfferRow[]>([]);
+  const [orders, setOrders] = useState<PartnerOrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [declining, setDeclining] = useState<string | null>(null); // offer_id being declined
+  const [declineReason, setDeclineReason] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
-    const partnerId = partner.id;
-
-    const [offersRes, bookingsRes] = await Promise.all([
-      supabase
-        .from('partner_offers')
-        .select('*')
-        .eq('partner_id', partnerId)
-        .eq('status', 'pending')
-        .order('offered_at', { ascending: false }),
-      supabase
-        .from('bookings')
-        .select('*')
-        .eq('assigned_partner_id', partnerId)
-        .in('status', ['price_confirmed', 'pickup_scheduled', 'picked_up', 'at_tailoring_partner', 'quality_check', 'ready_for_delivery'])
-        .order('updated_at', { ascending: false }),
+    const [offersRes, ordersRes] = await Promise.all([
+      supabase.rpc('partner_list_my_offers'),
+      supabase.rpc('partner_list_my_orders'),
     ]);
-
-    const pendingOffers = (offersRes.data as PartnerOffer[]) || [];
-    const bookings = (bookingsRes.data as Booking[]) || [];
-
-    const offeredBookingIds = pendingOffers.map((o) => o.booking_id);
-    let offeredBookings: Booking[] = [];
-    if (offeredBookingIds.length > 0) {
-      const { data } = await supabase.from('bookings').select('*').in('id', offeredBookingIds);
-      offeredBookings = (data as Booking[]) || [];
-    }
-
-    const allBookingIds = Array.from(new Set([...offeredBookingIds, ...bookings.map((b) => b.id)]));
-    const itemsMap: Record<string, BookingItem[]> = {};
-    if (allBookingIds.length > 0) {
-      const { data: itemsRes } = await supabase.from('booking_items').select('*').in('booking_id', allBookingIds);
-      for (const item of (itemsRes as BookingItem[]) || []) {
-        (itemsMap[item.booking_id] ||= []).push(item);
-      }
-    }
-
-    setOffers(pendingOffers.map((o) => ({
-      offer: o,
-      booking: offeredBookings.find((b) => b.id === o.booking_id)!,
-      items: itemsMap[o.booking_id] || [],
-    })).filter((x) => x.booking));
-
-    setOrders(bookings);
-    setItemsByBooking(itemsMap);
+    setOffers((offersRes.data as unknown as PartnerOfferRow[]) || []);
+    setOrders((ordersRes.data as unknown as PartnerOrderRow[]) || []);
     setLoading(false);
-  }, [partner.id]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  async function respondOffer(offerId: string, accept: boolean) {
+  async function acceptOffer(offer: PartnerOfferRow) {
     setActionMsg(null);
-    const { data } = await supabase.rpc('partner_respond_offer', { p_offer_id: offerId, p_accept: accept });
-    if (data?.error) { setActionMsg('Could not respond: ' + data.error); return; }
-    setActionMsg(accept ? 'Offer accepted — the order is now in My Orders below.' : 'Offer declined. StitchDoor has been notified.');
+    const { data } = await supabase.rpc('partner_respond_offer', { p_offer_id: offer.offer_id, p_accept: true });
+    if (data?.error) { setActionMsg('Could not accept: ' + (data.message || data.error)); return; }
+    setActionMsg('Offer accepted — the order is now in My Orders below.');
+    load();
+  }
+
+  async function declineOffer(offer: PartnerOfferRow) {
+    setActionMsg(null);
+    const { data } = await supabase.rpc('partner_respond_offer', {
+      p_offer_id: offer.offer_id, p_accept: false, p_reason: declineReason.trim(),
+    });
+    setDeclining(null);
+    setDeclineReason('');
+    if (data?.error) { setActionMsg('Could not decline: ' + (data.message || data.error)); return; }
+    setActionMsg('Offer declined. StitchDoor has been notified and will reassign the order.');
     load();
   }
 
@@ -155,6 +166,17 @@ function PartnerHome({ partner, onSignOut }: { partner: TailoringPartner; onSign
     if (data?.error) { setActionMsg('Could not update: ' + (data.message || data.error)); return; }
     setActionMsg('Order updated — the customer can now see "' + STAGE_LABELS[next] + '".');
     load();
+  }
+
+  function expiryLabel(expiresAt: string | null): { text: string; urgent: boolean } {
+    if (!expiresAt) return { text: 'No deadline', urgent: false };
+    const ms = new Date(expiresAt).getTime() - Date.now();
+    if (ms <= 0) return { text: 'Expired', urgent: true };
+    const hours = Math.floor(ms / 3600000);
+    if (hours < 1) return { text: 'Expires in less than an hour', urgent: true };
+    if (hours < 24) return { text: `Expires in ${hours}h`, urgent: true };
+    const days = Math.floor(hours / 24);
+    return { text: `Expires in ${days}d`, urgent: false };
   }
 
   return (
@@ -220,47 +242,88 @@ function PartnerHome({ partner, onSignOut }: { partner: TailoringPartner; onSign
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {offers.map(({ offer, booking, items }) => (
-                    <div key={offer.id} className="card p-5">
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                        <p className="font-semibold text-forest-700">{booking.booking_reference}</p>
-                        <span className="text-xs text-charcoal-400">{formatDateTime(offer.offered_at)}</span>
-                      </div>
-                      <div className="grid gap-3 text-sm sm:grid-cols-2">
-                        <div>
-                          <p className="text-xs text-charcoal-400">Customer</p>
-                          <p className="font-medium text-charcoal-800">{booking.customer_name}</p>
-                          <p className="text-xs text-charcoal-500">{booking.customer_phone}</p>
+                  {offers.map((offer) => {
+                    const expiry = expiryLabel(offer.expires_at);
+                    return (
+                      <div key={offer.offer_id} className="card p-5">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-semibold text-forest-700">{offer.booking_reference}</p>
+                          <div className="flex items-center gap-2">
+                            {offer.expires_at && (
+                              <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                                expiry.urgent ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                              }`}>
+                                <Timer className="h-3 w-3" /> {expiry.text}
+                              </span>
+                            )}
+                            <span className="text-xs text-charcoal-400">{formatDateTime(offer.offered_at)}</span>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-xs text-charcoal-400">Pickup</p>
-                          <p className="font-medium text-charcoal-800">{booking.locality}, {booking.pin_code}</p>
-                          <p className="text-xs text-charcoal-500">
-                            {booking.preferred_pickup_date ? new Date(booking.preferred_pickup_date).toLocaleDateString('en-IN') : 'Flexible'}
-                            {' • '}{booking.preferred_pickup_window}
-                          </p>
+                        {offer.assignment_note && (
+                          <div className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            <span className="font-semibold">Note from StitchDoor:</span> {offer.assignment_note}
+                          </div>
+                        )}
+                        <div className="grid gap-3 text-sm sm:grid-cols-2">
+                          <div>
+                            <p className="text-xs text-charcoal-400">Customer</p>
+                            <p className="font-medium text-charcoal-800">{offer.customer_name}</p>
+                            <p className="text-xs text-charcoal-500">{offer.customer_phone}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-charcoal-400">Pickup</p>
+                            <p className="font-medium text-charcoal-800">{offer.locality}, {offer.pin_code}</p>
+                            <p className="text-xs text-charcoal-500">
+                              {offer.preferred_pickup_date ? new Date(offer.preferred_pickup_date).toLocaleDateString('en-IN') : 'Flexible'}
+                              {' • '}{offer.preferred_pickup_window}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                      {items.length > 0 && (
-                        <div className="mt-3 rounded-lg bg-ivory-200 p-3 text-sm">
-                          {items.map((it) => (
-                            <div key={it.id} className="flex justify-between">
-                              <span>{it.service_name} × {it.quantity}</span>
-                              <span className="text-charcoal-500">{formatINR(it.line_total)}</span>
+                        {offer.additional_instructions && (
+                          <p className="mt-2 text-xs text-charcoal-500">Instructions: {offer.additional_instructions}</p>
+                        )}
+                        {offer.items.length > 0 && (
+                          <div className="mt-3 rounded-lg bg-ivory-200 p-3 text-sm">
+                            {offer.items.map((it, i) => (
+                              <div key={i} className="flex justify-between">
+                                <span>{it.service_name} × {it.quantity}</span>
+                                {it.garment_notes && <span className="text-charcoal-500">{it.garment_notes}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {declining === offer.offer_id ? (
+                          <div className="mt-4 space-y-2">
+                            <input
+                              type="text"
+                              value={declineReason}
+                              onChange={(e) => setDeclineReason(e.target.value)}
+                              className="input-field"
+                              placeholder="Reason for declining (helps us reassign faster)"
+                              maxLength={200}
+                              autoFocus
+                            />
+                            <div className="flex gap-2">
+                              <button onClick={() => declineOffer(offer)} className="btn-secondary text-sm !text-red-700">
+                                <XCircle className="h-4 w-4" /> Confirm decline
+                              </button>
+                              <button onClick={() => { setDeclining(null); setDeclineReason(''); }} className="btn-ghost text-sm">Cancel</button>
                             </div>
-                          ))}
-                        </div>
-                      )}
-                      <div className="mt-4 flex gap-2">
-                        <button onClick={() => respondOffer(offer.id, true)} className="btn-primary text-sm">
-                          <CheckCircle2 className="h-4 w-4" /> Accept
-                        </button>
-                        <button onClick={() => respondOffer(offer.id, false)} className="btn-secondary text-sm !text-red-700">
-                          <XCircle className="h-4 w-4" /> Decline
-                        </button>
+                          </div>
+                        ) : (
+                          <div className="mt-4 flex gap-2">
+                            <button onClick={() => acceptOffer(offer)} className="btn-primary text-sm">
+                              <CheckCircle2 className="h-4 w-4" /> Accept
+                            </button>
+                            <button onClick={() => setDeclining(offer.offer_id)} className="btn-secondary text-sm !text-red-700">
+                              <XCircle className="h-4 w-4" /> Decline
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -280,7 +343,7 @@ function PartnerHome({ partner, onSignOut }: { partner: TailoringPartner; onSign
                     const next = NEXT_STAGE[b.status];
                     const stageIdx = STAGE_FLOW.indexOf(b.status as PartnerStage);
                     return (
-                      <div key={b.id} className="card p-5">
+                      <div key={b.booking_id} className="card p-5">
                         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                           <p className="font-semibold text-forest-700">{b.booking_reference}</p>
                           <span className="rounded-full bg-forest-50 px-3 py-1 text-xs font-medium text-forest-700">
@@ -299,10 +362,13 @@ function PartnerHome({ partner, onSignOut }: { partner: TailoringPartner; onSign
                             <p className="text-xs text-charcoal-500">{b.locality}, {b.pin_code}</p>
                           </div>
                         </div>
-                        {(itemsByBooking[b.id] || []).length > 0 && (
+                        {b.additional_instructions && (
+                          <p className="mt-2 text-xs text-charcoal-500">Instructions: {b.additional_instructions}</p>
+                        )}
+                        {b.items.length > 0 && (
                           <div className="mt-3 rounded-lg bg-ivory-200 p-3 text-sm">
-                            {(itemsByBooking[b.id] || []).map((it) => (
-                              <div key={it.id} className="flex justify-between">
+                            {b.items.map((it, i) => (
+                              <div key={i} className="flex justify-between">
                                 <span>{it.service_name} × {it.quantity}</span>
                                 {it.garment_notes && <span className="text-charcoal-500">{it.garment_notes}</span>}
                               </div>
@@ -330,7 +396,7 @@ function PartnerHome({ partner, onSignOut }: { partner: TailoringPartner; onSign
 
                         {/* Stage advance */}
                         {next ? (
-                          <button onClick={() => updateStage(b.id, next)} className="btn-primary mt-4 text-sm">
+                          <button onClick={() => updateStage(b.booking_id, next)} className="btn-primary mt-4 text-sm">
                             <ArrowRight className="h-4 w-4" /> Mark as {STAGE_LABELS[next]}
                           </button>
                         ) : b.status === 'ready_for_delivery' ? (

@@ -107,6 +107,8 @@ export interface TailoringPartner {
   is_active: boolean;
   created_at: string;
   auth_user_id: string | null;
+  service_pin_codes: string;
+  capabilities: string;
   is_accepting_orders: boolean;
   partner_code: string | null;
 }

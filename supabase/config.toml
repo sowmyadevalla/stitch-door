@@ -3,3 +3,6 @@ verify_jwt = false
 
 [functions.booking-photo-access]
 verify_jwt = false
+
+[functions.partner-offer-notification]
+verify_jwt = false
