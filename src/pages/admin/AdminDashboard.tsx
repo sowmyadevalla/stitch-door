@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { LayoutDashboard, Scissors, Settings, LogOut, Loader2, ShieldAlert, Plus, Edit, Trash2, X, Download, ChevronRight, Bell, Clock, ClipboardList, UserPlus, RefreshCw, Users, XCircle, AlertTriangle, Send, PauseCircle, PlayCircle, Truck } from 'lucide-react';
+import { LayoutDashboard, Scissors, Settings, LogOut, Loader2, ShieldAlert, Plus, Edit, Trash2, X, Download, ChevronRight, Bell, Clock, ClipboardList, UserPlus, RefreshCw, Users, XCircle, AlertTriangle, Send, PauseCircle, PlayCircle, Truck, MessageSquare, Mail, Phone, Check, Archive } from 'lucide-react';
 import { DeliveryTab, DeliveryTeamSection, type DeliveryAgentRow, type DeliveryExceptionRow } from './DeliveryTab';
 import { useRouter } from '@/lib/router';
 import { useAuth } from '@/lib/auth';
@@ -29,7 +29,7 @@ interface DeclineRow {
   responded_at: string;
 }
 
-type AdminTab = 'overview' | 'bookings' | 'applications' | 'delivery' | 'services' | 'operations';
+type AdminTab = 'overview' | 'bookings' | 'applications' | 'delivery' | 'messages' | 'services' | 'operations';
 
 export function AdminDashboard() {
   const { session, isAdmin, loading, signOut } = useAuth();
@@ -95,6 +95,7 @@ export function AdminDashboard() {
     { key: 'bookings', label: 'Bookings', icon: Scissors },
     { key: 'applications', label: 'Applications', icon: ClipboardList },
     { key: 'delivery', label: 'Delivery', icon: Truck },
+    { key: 'messages', label: 'Messages', icon: MessageSquare },
     { key: 'services', label: 'Services', icon: Settings },
     { key: 'operations', label: 'Operations', icon: Settings },
   ];
@@ -157,6 +158,7 @@ export function AdminDashboard() {
             {tab === 'bookings' && <BookingsTab />}
             {tab === 'applications' && <ApplicationsTab />}
             {tab === 'delivery' && <DeliveryTabWrapper />}
+            {tab === 'messages' && <MessagesTab />}
             {tab === 'services' && <ServicesTab />}
             {tab === 'operations' && <OperationsTab />}
           </div>
@@ -197,6 +199,133 @@ function DeliveryTabWrapper() {
       )}
       <DeliveryTab />
       <DeliveryTeamSection agents={agents} onAgentsChanged={loadAgents} />
+    </div>
+  );
+}
+
+interface ContactMessageRow {
+  id: string;
+  name: string;
+  phone: string;
+  message: string;
+  status: 'new' | 'handled';
+  created_at: string;
+}
+
+function MessagesTab() {
+  const [messages, setMessages] = useState<ContactMessageRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [showHandled, setShowHandled] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await supabase
+      .from('contact_messages')
+      .select('id, name, phone, message, status, created_at')
+      .order('created_at', { ascending: false });
+    if (data) setMessages(data as ContactMessageRow[]);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    load();
+    const channel = supabase
+      .channel('contact-messages')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'contact_messages' },
+        () => load()
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [load]);
+
+  async function markHandled(id: string, handled: boolean) {
+    setBusyId(id);
+    await supabase
+      .from('contact_messages')
+      .update({ status: handled ? 'handled' : 'new', handled_at: handled ? new Date().toISOString() : null })
+      .eq('id', id);
+    setBusyId(null);
+    load();
+  }
+
+  const visible = showHandled ? messages : messages.filter((m) => m.status === 'new');
+  const newCount = messages.filter((m) => m.status === 'new').length;
+
+  if (loading) return <div className="py-12 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-forest-600" /></div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-charcoal-500">
+          Messages from the Contact page. Reply by phone or WhatsApp — the sender's number is on each message.
+        </p>
+        <label className="flex flex-shrink-0 cursor-pointer items-center gap-2 text-sm text-charcoal-600">
+          <input type="checkbox" checked={showHandled} onChange={(e) => setShowHandled(e.target.checked)} className="h-4 w-4 rounded border-charcoal-300" />
+          Show handled
+        </label>
+      </div>
+
+      {newCount > 0 && !showHandled && (
+        <div className="animate-fade-in rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+          {newCount} new message{newCount > 1 ? 's' : ''} waiting for a reply.
+        </div>
+      )}
+
+      {visible.length === 0 ? (
+        <div className="card p-10 text-center text-sm text-charcoal-500">
+          No messages yet. When a customer sends one from the Contact page, it appears here instantly.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {visible.map((m) => (
+            <div
+              key={m.id}
+              className={`card p-4 ${m.status === 'new' ? 'border-l-4 border-l-terracotta-500' : 'opacity-70'}`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-charcoal-900">{m.name}</p>
+                    {m.status === 'new' ? (
+                      <span className="rounded-full bg-terracotta-100 px-2 py-0.5 text-xs font-medium text-terracotta-700">New</span>
+                    ) : (
+                      <span className="rounded-full bg-forest-100 px-2 py-0.5 text-xs font-medium text-forest-700">Handled</span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-xs text-charcoal-400">{formatDateTime(m.created_at)}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a href={`tel:${m.phone}`} className="btn-ghost text-xs"><Phone className="h-3.5 w-3.5" /> {m.phone}</a>
+                  {(() => {
+                    const wa = m.phone.replace(/\D/g, '');
+                    return wa.length >= 10 && (
+                      <a
+                        href={`https://wa.me/${wa.length === 10 ? '91' + wa : wa}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn-ghost text-xs"
+                      >
+                        <Mail className="h-3.5 w-3.5" /> WhatsApp
+                      </a>
+                    );
+                  })()}
+                  <button
+                    onClick={() => markHandled(m.id, m.status === 'new')}
+                    disabled={busyId === m.id}
+                    className="btn-primary text-xs"
+                  >
+                    {busyId === m.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : m.status === 'new' ? <Check className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
+                    {m.status === 'new' ? 'Mark handled' : 'Reopen'}
+                  </button>
+                </div>
+              </div>
+              <p className="mt-3 whitespace-pre-wrap rounded-lg bg-ivory-200 p-3 text-sm text-charcoal-700">{m.message}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

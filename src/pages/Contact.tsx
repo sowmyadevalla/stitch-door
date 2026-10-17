@@ -1,24 +1,27 @@
 import { useState } from 'react';
 import { Mail, Phone, Clock, MapPin, MessageCircle, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { useBusinessConfig } from '@/lib/config';
+import { supabase } from '@/lib/supabase';
 
 export function Contact() {
   const { config } = useBusinessConfig();
   const [form, setForm] = useState({ name: '', phone: '', message: '' });
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus('submitting');
-    // Simulate submission — in production this would send to an edge function or email service
-    setTimeout(() => {
-      if (form.name && form.phone && form.message) {
-        setStatus('success');
-        setForm({ name: '', phone: '', message: '' });
-      } else {
-        setStatus('error');
-      }
-    }, 800);
+    const { error } = await supabase.from('contact_messages').insert({
+      name: form.name.trim().slice(0, 120),
+      phone: form.phone.trim().slice(0, 32),
+      message: form.message.trim().slice(0, 5000),
+    });
+    if (error) {
+      setStatus('error');
+    } else {
+      setStatus('success');
+      setForm({ name: '', phone: '', message: '' });
+    }
   }
 
   const whatsappNumber = config.whatsapp_number?.replace(/\D/g, '');
@@ -121,7 +124,7 @@ export function Contact() {
                 </div>
                 {status === 'error' && (
                   <div className="flex items-center gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
-                    <AlertCircle className="h-4 w-4" /> Please fill in all fields.
+                    <AlertCircle className="h-4 w-4" /> Sorry, something went wrong sending your message. Please try again or reach us on WhatsApp.
                   </div>
                 )}
                 <button type="submit" disabled={status === 'submitting'} className="btn-primary w-full">
@@ -129,7 +132,7 @@ export function Contact() {
                   Send Message
                 </button>
                 <p className="text-xs text-charcoal-400">
-                  Note: This form currently collects your message. For an immediate response, please use WhatsApp.
+                  For an immediate response, please use WhatsApp.
                 </p>
               </form>
             )}
