@@ -1,4 +1,4 @@
-import { Scissors, Truck, CheckCircle, Sparkles, ArrowRight, MapPin, Phone } from 'lucide-react';
+import { Scissors, Truck, CheckCircle, Sparkles, ArrowRight, MapPin, Phone, ChevronDown, MessageCircle, Mail } from 'lucide-react';
 import { Link } from '@/lib/router';
 import { useServices } from '@/lib/services';
 import { ServiceCard } from '@/components/ServiceCard';
@@ -186,6 +186,78 @@ export function Home() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ + Contact */}
+      <section id="faq" className="mx-auto max-w-7xl px-4 py-16 lg:px-8">
+        <div className="grid gap-10 lg:grid-cols-5">
+          <div className="lg:col-span-3">
+            <h2 className="mb-6 text-3xl font-semibold text-charcoal-900">Common Questions</h2>
+            <div className="space-y-3">
+              {[
+                {
+                  q: 'How does pricing work?',
+                  a: 'Prices shown are starting estimates. After reviewing your request (and photos, if added), we contact you with a confirmed price. Work begins only after you approve it.',
+                },
+                {
+                  q: 'Do I need to create an account?',
+                  a: 'No. You can book as a guest and track your order with your booking reference and the last 4 digits of your phone number. An account simply keeps your order history in one place.',
+                },
+                {
+                  q: 'When do I pay?',
+                  a: 'Payment happens after delivery — cash or UPI. Nothing is charged when you book.',
+                },
+                {
+                  q: 'Can I cancel my booking?',
+                  a: 'Yes, free of charge before pickup. After pickup, charges may apply based on the work already completed.',
+                },
+                {
+                  q: 'Do you serve my area?',
+                  a: 'We currently serve selected areas of Hyderabad. Check with us on WhatsApp before booking to confirm pickup availability in your PIN code.',
+                },
+              ].map((item, i) => (
+                <details key={i} className="card group px-5 py-4 [&_summary::-webkit-details-marker]:hidden">
+                  <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-charcoal-800">
+                    {item.q}
+                    <ChevronDown className="h-4 w-4 flex-shrink-0 text-forest-500 transition-transform group-open:rotate-180" />
+                  </summary>
+                  <p className="mt-3 text-sm leading-relaxed text-charcoal-500">{item.a}</p>
+                </details>
+              ))}
+            </div>
+            <Link to="/faqs" className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-forest-600 hover:underline">
+              See all FAQs <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+          <div id="contact" className="lg:col-span-2">
+            <div className="card h-full p-6">
+              <h2 className="mb-2 text-xl font-semibold text-charcoal-900">Still have a question?</h2>
+              <p className="mb-5 text-sm text-charcoal-500">
+                Not sure if we can handle your alteration? Send us a photo or a description on WhatsApp — we will tell you honestly what is possible.
+              </p>
+              <div className="space-y-3">
+                {config.whatsapp_number && (
+                  <a
+                    href={`https://wa.me/${config.whatsapp_number.replace(/\D/g, '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-primary w-full"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    Chat on WhatsApp
+                  </a>
+                )}
+                {config.contact_email && (
+                  <a href={`mailto:${config.contact_email}`} className="btn-secondary w-full">
+                    <Mail className="h-4 w-4" />
+                    Email Us
+                  </a>
+                )}
+                <p className="pt-2 text-center text-xs text-charcoal-400">{config.business_hours}</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>

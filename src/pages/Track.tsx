@@ -19,6 +19,45 @@ function getStoredTokens(): Record<string, StoredToken> {
   }
 }
 
+const NEXT_STEP_HINTS: Record<string, { title: string; body: string }> = {
+  request_received: {
+    title: 'We have your request',
+    body: 'Our team is reviewing your booking and preparing a price estimate. You do not need to do anything right now.',
+  },
+  awaiting_confirmation: {
+    title: 'Price confirmation in progress',
+    body: 'We will contact you shortly with the final price. Work begins only after you approve it.',
+  },
+  price_confirmed: {
+    title: 'Price approved',
+    body: 'Your pickup is being arranged for your preferred date and time window.',
+  },
+  pickup_scheduled: {
+    title: 'Pickup scheduled',
+    body: 'Please keep your garments ready. Our pickup team will arrive during your selected time window.',
+  },
+  picked_up: {
+    title: 'Your clothes are with us',
+    body: 'They are on their way to the tailoring partner. No action is needed from you.',
+  },
+  at_tailoring_partner: {
+    title: 'Work in progress',
+    body: 'A skilled tailoring partner is working on your garments. This is usually the longest stage.',
+  },
+  quality_check: {
+    title: 'Quality check',
+    body: 'The finished work is being checked against your instructions before it is returned.',
+  },
+  ready_for_delivery: {
+    title: 'Almost home',
+    body: 'Your garments are ready and delivery is being arranged. Keep the final amount ready — payment happens at delivery (cash or UPI).',
+  },
+  delivered: {
+    title: 'Delivered',
+    body: 'Thank you for choosing StitchDoor! We hope you love the results.',
+  },
+};
+
 export function Track() {
   const [ref, setRef] = useState('');
   const [phone, setPhone] = useState('');
@@ -184,7 +223,19 @@ export function Track() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-3">
+                <>
+                  {NEXT_STEP_HINTS[booking.status] && (
+                    <div className="mb-6 rounded-xl bg-forest-50 p-4">
+                      <p className="text-sm font-semibold text-forest-800">{NEXT_STEP_HINTS[booking.status].title}</p>
+                      <p className="mt-1 text-sm text-charcoal-600">{NEXT_STEP_HINTS[booking.status].body}</p>
+                      {booking.confirmed_amount === null && booking.status !== 'delivered' && (
+                        <p className="mt-2 text-xs text-terracotta-600">
+                          The final price will be confirmed with you before any work begins.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <div className="space-y-3">
                   {STATUS_FLOW.filter((s) => s.key !== 'cancelled').map((status, i) => {
                     const isDone = i <= currentStatusIndex;
                     const isCurrent = i === currentStatusIndex;
@@ -211,7 +262,8 @@ export function Track() {
                       </div>
                     );
                   })}
-                </div>
+                  </div>
+                </>
               )}
             </div>
 

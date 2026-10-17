@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { CheckCircle, ChevronRight, ChevronLeft, Plus, Minus, Trash2, AlertCircle, Loader2 } from 'lucide-react';
-import { Link, useRouter } from '@/lib/router';
+import { Link } from '@/lib/router';
 import { useServices } from '@/lib/services';
 import { useBusinessConfig, useServiceableAreas, isPincodeServiceable } from '@/lib/config';
 import { formatINR, PICKUP_WINDOWS } from '@/lib/constants';
@@ -421,7 +421,7 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
               </div>
               <div>
                 <label className="label-field">Mobile Number *</label>
-                <input type="tel" value={customer.phone} onChange={(e) => setCustomer({ ...customer, phone: e.target.value })} className="input-field" placeholder="10-digit mobile number" />
+                <input type="tel" inputMode="numeric" autoComplete="tel" value={customer.phone} onChange={(e) => setCustomer({ ...customer, phone: e.target.value })} className="input-field" placeholder="10-digit mobile number" />
                 {errors.phone && <p className="mt-1 text-xs text-terracotta-600">{errors.phone}</p>}
               </div>
               <div>
@@ -440,7 +440,7 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
               </div>
               <div>
                 <label className="label-field">PIN Code *</label>
-                <input type="text" value={customer.pin_code} onChange={(e) => setCustomer({ ...customer, pin_code: e.target.value })} className="input-field" placeholder="6-digit PIN code" maxLength={6} />
+                <input type="text" inputMode="numeric" autoComplete="postal-code" value={customer.pin_code} onChange={(e) => setCustomer({ ...customer, pin_code: e.target.value })} className="input-field" placeholder="6-digit PIN code" maxLength={6} />
                 {errors.pin_code && <p className="mt-1 text-xs text-terracotta-600">{errors.pin_code}</p>}
                 {pincodeServiceable === false && !errors.pin_code && (
                   <p className="mt-1 flex items-center gap-1 text-xs text-terracotta-600">
@@ -491,18 +491,24 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
           </div>
         )}
 
-        {/* Step 3: Price Summary */}
+        {/* Step 3: Review & Confirm */}
         {step === 3 && (
           <div className="animate-fade-in">
-            <h2 className="mb-4 text-xl font-semibold text-charcoal-800">Price Summary</h2>
-            <div className="card mb-6 p-6">
-              <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-charcoal-500">Selected Services</h3>
+            <h2 className="mb-4 text-xl font-semibold text-charcoal-800">Review Your Booking</h2>
+
+            {/* Services */}
+            <div className="card mb-4 p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-charcoal-500">Your Services</h3>
+                <button onClick={() => setStep(0)} className="text-xs font-medium text-forest-600 hover:underline">Edit</button>
+              </div>
               <div className="space-y-3">
                 {cart.map((item, i) => (
                   <div key={i} className="flex justify-between border-b border-ivory-300 pb-3 last:border-0">
                     <div>
                       <p className="text-sm font-medium text-charcoal-800">{item.service.name}</p>
                       <p className="text-xs text-charcoal-500">Qty: {item.quantity}</p>
+                      {item.garment_notes && <p className="mt-1 text-xs text-charcoal-400">{item.garment_notes}</p>}
                     </div>
                     <span className="text-sm font-medium text-charcoal-700">
                       {formatINR(item.service.starting_price * item.quantity)}
@@ -528,9 +534,30 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
               </div>
             </div>
 
+            {/* Pickup details */}
+            <div className="card mb-4 p-6">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-charcoal-500">Pickup Details</h3>
+                <button onClick={() => setStep(2)} className="text-xs font-medium text-forest-600 hover:underline">Edit</button>
+              </div>
+              <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                <div><dt className="text-xs text-charcoal-400">Name</dt><dd className="text-charcoal-800">{customer.name}</dd></div>
+                <div><dt className="text-xs text-charcoal-400">Mobile</dt><dd className="text-charcoal-800">{customer.phone}</dd></div>
+                {customer.email && <div><dt className="text-xs text-charcoal-400">Email</dt><dd className="text-charcoal-800">{customer.email}</dd></div>}
+                <div><dt className="text-xs text-charcoal-400">Preferred Pickup</dt><dd className="text-charcoal-800">{customer.pickup_date} · {customer.pickup_window}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-xs text-charcoal-400">Address</dt><dd className="text-charcoal-800">{customer.address}, {customer.locality} — {customer.pin_code}</dd></div>
+                {customer.instructions && <div className="sm:col-span-2"><dt className="text-xs text-charcoal-400">Instructions</dt><dd className="text-charcoal-800">{customer.instructions}</dd></div>}
+              </dl>
+              {photos.length > 0 && (
+                <div className="mt-3 border-t border-ivory-300 pt-3">
+                  <p className="text-xs text-charcoal-400">{photos.filter(p => p.status !== 'error').length} garment photo(s) attached</p>
+                </div>
+              )}
+            </div>
+
             <div className="rounded-xl bg-terracotta-50 p-4">
               <p className="text-sm text-charcoal-600">
-                <strong>Please note:</strong> This is an indicative estimate based on starting prices. The final amount will be confirmed before any work begins. No payment is required at this stage.
+                <strong>Please note:</strong> This is an indicative estimate based on starting prices. The final amount will be confirmed with you before any work begins — no payment is required at this stage. You pay after delivery (cash or UPI).
               </p>
             </div>
 

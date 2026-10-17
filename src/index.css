@@ -17,6 +17,12 @@
   ::selection {
     @apply bg-forest-200 text-forest-900;
   }
+  *:focus-visible {
+    @apply outline-none ring-2 ring-forest-400 ring-offset-2 ring-offset-ivory-100;
+  }
+  img {
+    @apply text-transparent;
+  }
 }
 
 @layer components {
@@ -24,7 +30,7 @@
     @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-ivory-100 disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-primary {
-    @apply btn bg-forest-600 text-ivory-50 hover:bg-forest-700 focus:ring-forest-400 shadow-soft hover:shadow-card;
+    @apply btn bg-forest-700 text-ivory-50 hover:bg-forest-800 focus:ring-forest-400 shadow-soft hover:shadow-card;
   }
   .btn-secondary {
     @apply btn bg-ivory-50 text-forest-700 border border-forest-200 hover:bg-forest-50 focus:ring-forest-400;
@@ -43,5 +49,18 @@
   }
   .card {
     @apply rounded-2xl bg-ivory-50 shadow-card transition-all duration-300;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
