@@ -6,6 +6,19 @@ import { STATUS_FLOW, STATUS_LABELS, getStatusIndex, formatINR } from '@/lib/con
 import { formatDateTime, formatDate } from '@/lib/utils';
 import type { Booking, BookingItem, BookingStatusHistory } from '@/lib/types';
 
+interface StoredToken {
+  token: string;
+  savedAt: number;
+}
+
+function getStoredTokens(): Record<string, StoredToken> {
+  try {
+    return JSON.parse(localStorage.getItem('sd_tracking') || '{}');
+  } catch {
+    return {};
+  }
+}
+
 export function Track() {
   const [ref, setRef] = useState('');
   const [phone, setPhone] = useState('');
@@ -15,69 +28,81 @@ export function Track() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (!ref.trim()) {
-      setError('Please enter your booking reference.');
-      return;
+  // Auto-track returning visitors who booked earlier on this device
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const refParam = params.get('ref');
+    const target = refParam?.trim().toUpperCase() || (ref ? ref.trim().toUpperCase() : '');
+    if (!target) return;
+    const stored = getStoredTokens()[target];
+    if (stored?.token) {
+      setRef(target);
+      doTrack(target, '', true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function doTrack(refValue: string, phoneValue: string, useToken = false) {
     setLoading(true);
     setError(null);
     setBooking(null);
     setItems([]);
     setHistory([]);
 
-    const { data, error: queryError } = await supabase
-      .from('bookings')
-      .select('*')
-      .eq('booking_reference', ref.trim().toUpperCase())
-      .maybeSingle();
+    const stored = getStoredTokens()[refValue];
+    const last4 = useToken && stored?.token
+      ? ''
+      : phoneValue.trim().replace(/\D/g, '').slice(-4);
 
-    if (queryError) {
+    const { data, error: rpcError } = await supabase.rpc('track_booking', {
+      p_ref: refValue,
+      p_last4: last4,
+    });
+
+    if (rpcError) {
       setError('Something went wrong. Please try again.');
       setLoading(false);
       return;
     }
 
-    if (!data) {
+    const result = data as {
+      error?: string;
+      booking?: Booking;
+      items?: BookingItem[];
+      history?: BookingStatusHistory[];
+    };
+
+    if (result?.error === 'not_found') {
       setError('No booking found with this reference. Please check and try again.');
       setLoading(false);
       return;
     }
-
-    const bookingData = data as Booking;
-
-    // Verify with last 4 digits of phone if provided
-    if (phone.trim()) {
-      const last4 = phone.trim().replace(/\D/g, '').slice(-4);
-      const bookingLast4 = bookingData.customer_phone.slice(-4);
-      if (last4 !== bookingLast4) {
-        setError('The phone number does not match this booking. Please verify and try again.');
-        setLoading(false);
-        return;
-      }
+    if (result?.error === 'phone_mismatch' || result?.error === 'phone_required') {
+      setError('The phone number does not match this booking. Please verify and try again.');
+      setLoading(false);
+      return;
+    }
+    if (result?.error || !result?.booking) {
+      setError('Something went wrong. Please try again.');
+      setLoading(false);
+      return;
     }
 
-    setBooking(bookingData);
-
-    // Load items
-    const { data: itemsData } = await supabase
-      .from('booking_items')
-      .select('*')
-      .eq('booking_id', bookingData.id)
-      .order('created_at');
-    if (itemsData) setItems(itemsData as BookingItem[]);
-
-    // Load status history (non-internal)
-    const { data: histData } = await supabase
-      .from('booking_status_history')
-      .select('*')
-      .eq('booking_id', bookingData.id)
-      .eq('is_internal', false)
-      .order('created_at');
-    if (histData) setHistory(histData as BookingStatusHistory[]);
-
+    setBooking(result.booking);
+    setItems(result.items || []);
+    setHistory(result.history || []);
     setLoading(false);
+  }
+
+  async function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    const target = ref.trim().toUpperCase();
+    if (!target) {
+      setError('Please enter your booking reference.');
+      return;
+    }
+    setRef(target);
+    await doTrack(target, phone);
   }
 
   const currentStatusIndex = booking ? getStatusIndex(booking.status) : -1;

@@ -393,6 +393,31 @@ function BookingDetailModal({
   const [cancelReason, setCancelReason] = useState(booking.cancellation_reason);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<{ id: string; url: string | null; original_name: string; file_size: number }[]>([]);
+  const [photosLoading, setPhotosLoading] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setPhotosLoading(true);
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const jwt = sessionData.session?.access_token || supabaseAnonKey;
+      try {
+        const res = await fetch(`${supabaseUrl}/functions/v1/booking-photo-access`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
+          body: JSON.stringify({ action: 'list', booking_id: booking.id }),
+        });
+        if (res.ok) {
+          const json = await res.json() as { photos?: { id: string; url: string | null; original_name: string; file_size: number }[] };
+          setPhotos(json.photos || []);
+        }
+      } finally {
+        setPhotosLoading(false);
+      }
+    })();
+  }, [booking.id]);
 
   async function saveChanges() {
     setSaving(true);
@@ -442,6 +467,22 @@ function BookingDetailModal({
           <div className="sm:col-span-2"><p className="text-xs text-charcoal-400">Address</p><p className="font-medium">{booking.pickup_address}, {booking.locality}, {booking.pin_code}</p></div>
           {booking.additional_instructions && <div className="sm:col-span-2"><p className="text-xs text-charcoal-400">Instructions</p><p className="font-medium">{booking.additional_instructions}</p></div>}
         </div>
+
+        {/* Garment Photos */}
+        {photosLoading ? (
+          <div className="mb-4 flex items-center gap-2 text-sm text-charcoal-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading photos…</div>
+        ) : photos.length > 0 ? (
+          <div className="mb-4">
+            <h4 className="mb-2 text-sm font-semibold text-charcoal-700">Garment Photos</h4>
+            <div className="flex flex-wrap gap-2">
+              {photos.map((p) => (
+                <a key={p.id} href={p.url || '#'} target="_blank" rel="noopener noreferrer">
+                  <img src={p.url || ''} alt={p.original_name || 'Garment photo'} className="h-20 w-20 rounded-lg object-cover transition-opacity hover:opacity-80" />
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {/* Items */}
         {items.length > 0 && (

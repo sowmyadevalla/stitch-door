@@ -1,2 +1,5 @@
 [functions.new-booking-notification]
 verify_jwt = false
+
+[functions.booking-photo-access]
+verify_jwt = false

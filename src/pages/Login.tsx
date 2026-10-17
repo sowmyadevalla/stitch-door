@@ -126,6 +126,32 @@ export function Login() {
             <div className="rounded-lg bg-forest-50 p-3 text-sm text-forest-700">{message}</div>
           )}
 
+          {mode === 'login' && (
+            <div className="text-right">
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!email.trim()) {
+                    setError('Enter your email above first, then tap Forgot Password.');
+                    return;
+                  }
+                  setLoading(true);
+                  setError(null);
+                  const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim());
+                  setLoading(false);
+                  if (resetError) {
+                    setError(resetError.message);
+                  } else {
+                    setMessage('Password reset email sent! Check your inbox.');
+                  }
+                }}
+                className="text-xs text-forest-600 hover:underline"
+              >
+                Forgot Password?
+              </button>
+            </div>
+          )}
+
           <button type="submit" disabled={loading} className="btn-primary w-full">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {mode === 'login' ? 'Sign In' : 'Create Account'}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Scissors, Truck, CheckCircle, ClipboardList, ChevronRight, ChevronLeft, Plus, Minus, Trash2, AlertCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, ChevronRight, ChevronLeft, Plus, Minus, Trash2, AlertCircle, Loader2 } from 'lucide-react';
 import { Link, useRouter } from '@/lib/router';
 import { useServices } from '@/lib/services';
 import { useBusinessConfig, useServiceableAreas, isPincodeServiceable } from '@/lib/config';
@@ -7,7 +7,9 @@ import { formatINR, PICKUP_WINDOWS } from '@/lib/constants';
 import { validateIndianMobile, validatePincode } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
+import { PhotoUploader, uploadBookingPhotos } from '@/components/PhotoUploader';
 import type { CartItem, Service } from '@/lib/types';
+import type { PhotoEntry } from '@/components/PhotoUploader';
 
 const STEPS = ['Choose Service', 'Garment Details', 'Customer Details', 'Price Summary', 'Confirmation'];
 
@@ -16,7 +18,6 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
   const { config } = useBusinessConfig();
   const { areas } = useServiceableAreas();
   const { session } = useAuth();
-  const { navigate } = useRouter();
 
   const [step, setStep] = useState(0);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -35,6 +36,7 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [bookingRef, setBookingRef] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<PhotoEntry[]>([]);
 
   useEffect(() => {
     if (!loading && preselectedSlug) {
@@ -136,17 +138,10 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const { data: refData, error: refError } = await supabase.rpc('generate_booking_reference');
-      if (refError || !refData) throw new Error('Could not generate booking reference.');
-      const reference = refData as string;
-
       const phoneNormalized = validateIndianMobile(customer.phone).normalized;
 
-      const { data: bookingData, error: bookingError } = await supabase
-        .from('bookings')
-        .insert({
-          booking_reference: reference,
-          user_id: session?.user?.id || null,
+      const { data, error: rpcError } = await supabase.rpc('create_booking', {
+        p_payload: {
           customer_name: customer.name.trim(),
           customer_phone: phoneNormalized,
           customer_email: customer.email.trim(),
@@ -156,40 +151,56 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
           preferred_pickup_date: customer.pickup_date || null,
           preferred_pickup_window: customer.pickup_window,
           additional_instructions: customer.instructions.trim(),
-          status: 'request_received',
-          estimated_total: total,
-          pickup_delivery_fee: deliveryFee,
-          payment_status: 'pending',
-          payment_method: 'manual',
-        })
-        .select('id')
-        .single();
-
-      if (bookingError || !bookingData) throw new Error('Failed to save booking. Please try again.');
-
-      const bookingId = bookingData.id;
-      const items = cart.map((item) => ({
-        booking_id: bookingId,
-        service_id: item.service.id,
-        service_name: item.service.name,
-        quantity: item.quantity,
-        garment_notes: item.garment_notes + (Object.keys(item.answers).length > 0
-          ? '\n' + Object.entries(item.answers).map(([k, v]) => `${k}: ${v}`).join('\n')
-          : ''),
-        unit_price: item.service.starting_price,
-        line_total: item.service.starting_price * item.quantity,
-      }));
-
-      const { error: itemsError } = await supabase.from('booking_items').insert(items);
-      if (itemsError) throw new Error('Failed to save booking items. Please try again.');
-
-      const { error: historyError } = await supabase.from('booking_status_history').insert({
-        booking_id: bookingId,
-        status: 'request_received',
-        note: 'Booking request submitted by customer.',
-        is_internal: false,
+          items: cart.map((item) => ({
+            service_id: item.service.id,
+            quantity: item.quantity,
+            garment_notes: item.garment_notes,
+            answers_text: Object.entries(item.answers).map(([k, v]) => `${k}: ${v}`).join('\n'),
+          })),
+        },
       });
-      if (historyError) throw new Error('Failed to create status history.');
+
+      if (rpcError) throw new Error('Failed to save booking. Please try again.');
+
+      const result = data as {
+        error?: string;
+        booking_reference?: string;
+        tracking_token?: string;
+        estimated_total?: number;
+      };
+
+      if (result?.error) {
+        const messages: Record<string, string> = {
+          missing_fields: 'Please fill in all required fields.',
+          invalid_phone: 'Please enter a valid 10-digit Indian mobile number.',
+          invalid_pincode: 'Please enter a valid 6-digit PIN code.',
+          invalid_service: 'One of the selected services is no longer available. Please review your selection.',
+          empty_items: 'Please select at least one service.',
+          server_error: 'Something went wrong while saving. Please try again.',
+        };
+        throw new Error(messages[result.error] || 'Could not save the booking. Please try again.');
+      }
+
+      if (!result?.booking_reference) throw new Error('Could not save the booking. Please try again.');
+
+      const reference = result.booking_reference;
+      const bookingId = (data as { booking_id?: string }).booking_id || '';
+
+      // Best-effort photo upload — booking is already saved if this fails
+      try {
+        await uploadBookingPhotos(bookingId, result.tracking_token, photos);
+      } catch {
+        // photo upload failure does not invalidate the booking
+      }
+
+      // Save the tracking token so the guest can track without re-verifying
+      try {
+        const stored = JSON.parse(localStorage.getItem('sd_tracking') || '{}');
+        stored[reference] = { token: result.tracking_token, savedAt: Date.now() };
+        localStorage.setItem('sd_tracking', JSON.stringify(stored));
+      } catch {
+        // tracking token storage is best-effort
+      }
 
       // Fire notification to admin (edge function — non-blocking, best-effort)
       try {
@@ -203,7 +214,7 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
           },
           body: JSON.stringify({
             record: {
-              id: bookingId,
+              id: (data as { booking_id?: string }).booking_id,
               booking_reference: reference,
               customer_name: customer.name.trim(),
               customer_phone: phoneNormalized,
@@ -214,7 +225,7 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
               preferred_pickup_date: customer.pickup_date || null,
               preferred_pickup_window: customer.pickup_window,
               additional_instructions: customer.instructions.trim(),
-              estimated_total: total,
+              estimated_total: result.estimated_total,
             },
           }),
         });
@@ -386,6 +397,12 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
                       placeholder="Describe the garment, what needs to be done, and any specific preferences..."
                     />
                   </div>
+
+                  {index === 0 && (
+                    <div className="mt-4">
+                      <PhotoUploader photos={photos} onChange={setPhotos} />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
