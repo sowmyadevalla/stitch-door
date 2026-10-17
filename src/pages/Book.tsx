@@ -11,8 +11,10 @@ import { PhotoUploader, uploadBookingPhotos } from '@/components/PhotoUploader';
 import type { CartItem, Service, MeasurementMode } from '@/lib/types';
 import type { PhotoEntry } from '@/components/PhotoUploader';
 
-const STEPS = ['Choose Service', 'Garment & Measurements', 'Customer Details', 'Price Summary', 'Confirmation'];
+const STEPS = ['Choose Service', 'Garment & Measurements', 'Address & Appointment', 'Review', 'Confirmation'];
 
+// Measurement fields relevant per service category. Alterations and repairs
+// only need fit guidance, not a full measurement set.
 const MEASUREMENT_FIELDS = [
   { key: 'bust_chest', label: 'Bust / Chest (inches)' },
   { key: 'waist', label: 'Waist (inches)' },
@@ -21,11 +23,24 @@ const MEASUREMENT_FIELDS = [
   { key: 'sleeve_length', label: 'Sleeve length (inches)' },
   { key: 'length', label: 'Garment length (inches)' },
 ];
+const FULL_SET = MEASUREMENT_FIELDS;
+const ALTERATION_SET = [
+  { key: 'length', label: 'Desired length (inches, optional)' },
+  { key: 'waist', label: 'Waist (inches, optional)' },
+];
+
+const MEASUREMENT_SETS: Record<string, typeof MEASUREMENT_FIELDS> = {
+  stitching: FULL_SET,
+  custom: FULL_SET,
+  transformation: FULL_SET,
+  alterations: ALTERATION_SET,
+  repairs: ALTERATION_SET,
+};
 
 const MEASUREMENT_MODES: { key: MeasurementMode; label: string; description: string; icon: typeof Ruler }[] = [
-  { key: 'enter_now', label: 'I will enter my measurements', description: 'Best for standard fits and repeat orders. Enter them in the next step.', icon: Ruler },
-  { key: 'home_visit', label: 'Request a home measurement visit', description: 'A tailor will measure you at home before work begins.', icon: Home },
-  { key: 'at_pickup', label: 'Measure at pickup', description: 'Bring a well-fitting reference garment and our team will note measurements at pickup.', icon: ClipboardCheck },
+  { key: 'enter_now', label: 'I will provide my measurements', description: 'Enter them yourself — best for standard fits and repeat orders.', icon: Ruler },
+  { key: 'home_visit', label: 'I need a tailor to take my measurements', description: 'A tailor visits your home, measures you, then work begins.', icon: Home },
+  { key: 'at_pickup', label: 'Measure at pickup', description: 'Keep a well-fitting reference garment ready and our team will note measurements at pickup.', icon: ClipboardCheck },
 ];
 
 function newCartItem(service: Service): CartItem {
@@ -40,10 +55,14 @@ function newCartItem(service: Service): CartItem {
   };
 }
 
+function measurementFieldsFor(service: Service) {
+  return MEASUREMENT_SETS[service.category] || FULL_SET;
+}
+
 export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
   const { services, loading } = useServices();
   const { config } = useBusinessConfig();
-  const { areas } = useServiceableAreas();
+  const { areas, loading: areasLoading } = useServiceableAreas();
   const { session } = useAuth();
 
   const [step, setStep] = useState(0);
@@ -52,7 +71,8 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
     name: '',
     phone: '',
     email: '',
-    address: '',
+    house_street: '',
+    landmark: '',
     locality: '',
     pin_code: '',
     pickup_date: '',
@@ -69,7 +89,7 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
     window: string;
     total: number;
   } | null>(null);
-  const [photos, setPhotos] = useState<PhotoEntry[]>([]);
+  const [photosByItem, setPhotosByItem] = useState<Record<number, PhotoEntry[]>>({});
   const clientRequestId = useMemo(() => crypto.randomUUID(), []);
 
   useEffect(() => {
@@ -158,6 +178,11 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
   const pincodeServiceable = customer.pin_code
     ? isPincodeServiceable(customer.pin_code, areas)
     : null;
+  const fullAddress = [
+    customer.house_street.trim(),
+    customer.landmark.trim(),
+    customer.locality.trim(),
+  ].filter(Boolean).join(', ');
 
   function validateStep(currentStep: number): boolean {
     const errs: Record<string, string> = {};
@@ -166,12 +191,12 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
     }
     if (currentStep === 1) {
       cart.forEach((item, index) => {
+        const fields = measurementFieldsFor(item.service);
         if (item.measurement_mode === 'enter_now') {
-          const hasAny = MEASUREMENT_FIELDS.some(
-            (f) => item.measurements[f.key]?.trim()
-          );
-          if (!hasAny) {
-            errs[`measurements_${index}`] = `For ${item.service.name}, enter at least one measurement, or choose a home visit / measure at pickup instead.`;
+          const hasAny = fields.some((f) => item.measurements[f.key]?.trim());
+          const required = item.service.category === 'Blouse' || item.service.category === 'Custom' || item.service.category === 'Transformation';
+          if (!hasAny && required) {
+            errs[`measurements_${index}`] = `For ${item.service.name}, enter at least one measurement, or choose a tailor visit / measure at pickup instead.`;
           }
           Object.entries(item.measurements).forEach(([, v]) => {
             if (v.trim() && !/^\d{1,3}(\.\d)?$/.test(v.trim())) {
@@ -189,9 +214,9 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
       if (!customer.name.trim()) errs.name = 'Full name is required.';
       if (!customer.phone.trim()) errs.phone = 'Mobile number is required.';
       else if (!phoneCheck.valid) errs.phone = 'Please enter a valid 10-digit Indian mobile number.';
-      if (!customer.address.trim()) errs.address = 'Pickup address is required.';
-      if (customer.address.trim().length < 10) errs.address = 'Please enter the full address (flat / house no, building, street).';
-      if (!customer.locality.trim()) errs.locality = 'Locality is required.';
+      if (!customer.house_street.trim()) errs.house_street = 'House / flat number and street are required.';
+      else if (customer.house_street.trim().length < 5) errs.house_street = 'Please enter your house/flat number and street name.';
+      if (!customer.locality.trim()) errs.locality = 'Locality / area is required.';
       if (!customer.pin_code.trim()) errs.pin_code = 'PIN code is required.';
       else if (!validatePincode(customer.pin_code)) errs.pin_code = 'Enter a valid 6-digit PIN code.';
       else if (areas.length > 0 && pincodeServiceable === false) errs.pin_code = 'Sorry, we do not currently serve this PIN code. Try one of our service areas.';
@@ -234,7 +259,7 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
           customer_name: customer.name.trim(),
           customer_phone: phoneNormalized,
           customer_email: customer.email.trim(),
-          pickup_address: customer.address.trim(),
+          pickup_address: fullAddress,
           locality: customer.locality.trim(),
           pin_code: customer.pin_code.trim(),
           preferred_pickup_date: customer.pickup_date || null,
@@ -243,7 +268,7 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
           items: cart.map((item) => {
             const measurementLines: string[] = [];
             if (item.measurement_mode === 'enter_now') {
-              const entered = MEASUREMENT_FIELDS.filter(
+              const entered = measurementFieldsFor(item.service).filter(
                 (f) => item.measurements[f.key]?.trim()
               ).map((f) => `${f.label}: ${item.measurements[f.key].trim()}`);
               if (entered.length > 0) measurementLines.push(`Measurements (customer-provided):\n${entered.join('\n')}`);
@@ -297,7 +322,8 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
 
       // Best-effort photo upload — booking is already saved if this fails
       try {
-        await uploadBookingPhotos(bookingId, result.tracking_token, photos);
+        const allPhotos = Object.values(photosByItem).flat();
+        await uploadBookingPhotos(bookingId, result.tracking_token, allPhotos);
       } catch {
         // photo upload failure does not invalidate the booking
       }
@@ -328,7 +354,7 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
               customer_name: customer.name.trim(),
               customer_phone: phoneNormalized,
               customer_email: customer.email.trim(),
-              pickup_address: customer.address.trim(),
+              pickup_address: fullAddress,
               locality: customer.locality.trim(),
               pin_code: customer.pin_code.trim(),
               preferred_pickup_date: customer.pickup_date || null,
@@ -390,8 +416,12 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
 
       {/* Stepper */}
       <div className="mx-auto max-w-4xl px-4 py-8 lg:px-8">
-        <div className="mb-8 flex items-center justify-between">
-          {STEPS.slice(0, 4).map((label, i) => (
+        <div className="mb-8">
+          <p className="mb-2 text-center text-xs font-medium uppercase tracking-wider text-charcoal-400 sm:hidden">
+            Step {step + 1} of 4 · {STEPS[step]}
+          </p>
+          <div className="flex items-center justify-between">
+            {STEPS.slice(0, 4).map((label, i) => (
             <div key={i} className="flex flex-1 items-center">
               <div className="flex flex-col items-center">
                 <div
@@ -414,6 +444,7 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
               )}
             </div>
           ))}
+          </div>
         </div>
 
         {/* Step 0: Choose Service */}
@@ -547,7 +578,7 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
 
                     {item.measurement_mode === 'enter_now' && (
                       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                        {MEASUREMENT_FIELDS.map((f) => (
+                        {measurementFieldsFor(item.service).map((f) => (
                           <div key={f.key}>
                             <label className="label-field">{f.label}</label>
                             <input
@@ -580,7 +611,9 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
                           <p className="mt-1 text-xs text-terracotta-600">{errors[`visit_${index}`]}</p>
                         )}
                         <p className="mt-1 text-xs text-charcoal-400">
-                          We'll call to fix an exact slot. Measurements are recorded as pending until the visit.
+                          A tailor will call you to fix an exact time within business hours ({config.business_hours}).
+                          There is no extra charge for the measurement visit — it's included with your order.
+                          Measurements are recorded as pending until the visit.
                         </p>
                       </div>
                     )}
@@ -610,11 +643,12 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
                     </p>
                   )}
 
-                  {index === 0 && (
-                    <div className="mt-4">
-                      <PhotoUploader photos={photos} onChange={setPhotos} />
-                    </div>
-                  )}
+                  <div className="mt-4">
+                    <PhotoUploader
+                      photos={photosByItem[index] || []}
+                      onChange={(entries) => setPhotosByItem((prev) => ({ ...prev, [index]: entries }))}
+                    />
+                  </div>
                 </div>
               ))}
             </div>
@@ -641,14 +675,18 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
                 <input type="email" value={customer.email} onChange={(e) => setCustomer({ ...customer, email: e.target.value })} className="input-field" placeholder="your@email.com" />
               </div>
               <div>
-                <label className="label-field">Locality *</label>
+                <label className="label-field">House / Flat No. & Street *</label>
+                <input type="text" value={customer.house_street} onChange={(e) => setCustomer({ ...customer, house_street: e.target.value })} className="input-field" placeholder="e.g. Flat 402, Green Meadows, Road No. 12" autoComplete="street-address" />
+                {errors.house_street && <p className="mt-1 text-xs text-terracotta-600">{errors.house_street}</p>}
+              </div>
+              <div>
+                <label className="label-field">Landmark (optional)</label>
+                <input type="text" value={customer.landmark} onChange={(e) => setCustomer({ ...customer, landmark: e.target.value })} className="input-field" placeholder="e.g. Near Botanical Garden metro" />
+              </div>
+              <div>
+                <label className="label-field">Locality / Area *</label>
                 <input type="text" value={customer.locality} onChange={(e) => setCustomer({ ...customer, locality: e.target.value })} className="input-field" placeholder="e.g. Kondapur, Gachibowli" />
                 {errors.locality && <p className="mt-1 text-xs text-terracotta-600">{errors.locality}</p>}
-              </div>
-              <div className="sm:col-span-2">
-                <label className="label-field">Complete Pickup Address *</label>
-                <textarea value={customer.address} onChange={(e) => setCustomer({ ...customer, address: e.target.value })} rows={3} className="input-field resize-none" placeholder="Flat / House no, building, street, landmark" />
-                {errors.address && <p className="mt-1 text-xs text-terracotta-600">{errors.address}</p>}
               </div>
               <div>
                 <label className="label-field">PIN Code *</label>
@@ -661,9 +699,31 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
                 )}
                 {pincodeServiceable === true && (
                   <p className="mt-1 flex items-center gap-1 text-xs text-forest-600">
-                    <CheckCircle className="h-3 w-3" /> Great! We serve this area.
+                    <CheckCircle className="h-3 w-3" /> Great! We serve this area — pickup, measurement visits, and return delivery are all available here{deliveryFee > 0 ? ` (pickup & delivery: ${formatINR(deliveryFee)})` : ' (pickup & delivery are currently free)'}.
                   </p>
                 )}
+              </div>
+              <div className="sm:col-span-2">
+                <div className="rounded-xl bg-forest-50 p-4">
+                  <p className="text-sm font-medium text-forest-800">Areas we currently serve</p>
+                  {areasLoading ? (
+                    <p className="mt-1 text-xs text-charcoal-400">Checking...</p>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {areas.map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          onClick={() => setCustomer((prev) => ({ ...prev, pin_code: a.pin_code, locality: prev.locality || a.locality }))}
+                          className="rounded-full bg-ivory-50 px-3 py-1 text-xs text-charcoal-600 transition-colors hover:bg-forest-100 hover:text-forest-700"
+                        >
+                          {a.locality} · {a.pin_code}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <p className="mt-2 text-xs text-charcoal-400">Tap an area to fill its PIN code. Not listed? We're expanding — write to us and we'll notify you.</p>
+                </div>
               </div>
               <div>
                 <label className="label-field">Preferred Pickup Date *</label>
@@ -747,8 +807,8 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
                     <p className="mt-1 text-xs text-charcoal-500">
                       Measurements:{' '}
                       {item.measurement_mode === 'enter_now'
-                        ? MEASUREMENT_FIELDS.some((f) => item.measurements[f.key]?.trim())
-                          ? MEASUREMENT_FIELDS.filter((f) => item.measurements[f.key]?.trim())
+                        ? measurementFieldsFor(item.service).some((f) => item.measurements[f.key]?.trim())
+                          ? measurementFieldsFor(item.service).filter((f) => item.measurements[f.key]?.trim())
                               .map((f) => `${f.label.replace(/ \(inches\)/, '')} ${item.measurements[f.key]}`)
                               .join(', ')
                           : 'provided at pickup'
@@ -764,10 +824,15 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
                   <span>Service Subtotal (estimate)</span>
                   <span>{formatINR(subtotal)}</span>
                 </div>
-                {deliveryFee > 0 && (
+                {deliveryFee > 0 ? (
                   <div className="flex justify-between text-sm text-charcoal-600">
                     <span>Pickup & Delivery</span>
                     <span>{formatINR(deliveryFee)}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between text-sm text-forest-600">
+                    <span>Pickup & Delivery</span>
+                    <span className="font-medium">Free</span>
                   </div>
                 )}
                 <div className="flex justify-between border-t border-ivory-300 pt-2 text-base font-semibold text-charcoal-800">
@@ -788,12 +853,12 @@ export function Book({ preselectedSlug }: { preselectedSlug?: string }) {
                 <div><dt className="text-xs text-charcoal-400">Mobile</dt><dd className="text-charcoal-800">{customer.phone}</dd></div>
                 {customer.email && <div><dt className="text-xs text-charcoal-400">Email</dt><dd className="text-charcoal-800">{customer.email}</dd></div>}
                 <div><dt className="text-xs text-charcoal-400">Preferred Pickup</dt><dd className="text-charcoal-800">{customer.pickup_date} · {customer.pickup_window}</dd></div>
-                <div className="sm:col-span-2"><dt className="text-xs text-charcoal-400">Address</dt><dd className="text-charcoal-800">{customer.address}, {customer.locality} — {customer.pin_code}</dd></div>
+                <div className="sm:col-span-2"><dt className="text-xs text-charcoal-400">Address</dt><dd className="text-charcoal-800">{fullAddress} — {customer.pin_code}</dd></div>
                 {customer.instructions && <div className="sm:col-span-2"><dt className="text-xs text-charcoal-400">Instructions</dt><dd className="text-charcoal-800">{customer.instructions}</dd></div>}
               </dl>
-              {photos.length > 0 && (
+              {Object.values(photosByItem).flat().length > 0 && (
                 <div className="mt-3 border-t border-ivory-300 pt-3">
-                  <p className="text-xs text-charcoal-400">{photos.filter(p => p.status !== 'error').length} garment photo(s) attached</p>
+                  <p className="text-xs text-charcoal-400">{Object.values(photosByItem).flat().filter(p => p.status !== 'error').length} garment photo(s) attached</p>
                 </div>
               )}
             </div>
