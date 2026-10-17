@@ -77,6 +77,29 @@ Status key: [ ] = not done, [x] = done, [-] = intentionally skipped/deferred.
 - [ ] Customer sees status change on the tracking page throughout.
 - [ ] Admin marks booking delivered; confirm final state on both dashboards.
 
+## 7b. Delivery agent workflow (new — verified server-side this session; do the UI rehearsal)
+
+- [ ] Add your first real delivery agent in Admin → Delivery → Delivery Team
+      (name, phone, service areas), then use "Set up login" to create their
+      email + temporary password.
+- [ ] Agent signs in at /agent-login, lands on their Delivery Dashboard.
+- [ ] Create a pickup task from a booking; assign it; agent accepts; agent advances
+      on the way → collected → confirm handover. Booking auto-advances to
+      "Picked Up" (only from price_confirmed/pickup_scheduled).
+- [ ] Create a return-delivery task; a 6-digit customer code is shown ONCE to you at
+      creation — share it with the customer by phone/WhatsApp. Assign, agent advances
+      out for delivery (booking shows "Ready for Delivery" to the customer), agent
+      enters the code at the door; booking becomes Delivered.
+- [ ] Rehearse the exception paths: agent "Report Issue", admin "Flag issue" /
+      "Mark failed" / reassign / "Return to unassigned" / cancel (reason required).
+- [ ] Rehearse the lost-code path: a wrong code locks verification after 5 tries for
+      15 minutes; reassigning the task refreshes the code window — agree your
+      phone-support process for customers who lose the code.
+- [ ] Agent email notification requires `RESEND_API_KEY` (section 5). Without it the
+      assignment still succeeds and the dashboard states plainly that no email was sent.
+- [ ] Confirm agents cannot see admin notes, prices, other agents' tasks, or bookings
+      directly (verified in testing; spot-check once with a real agent account).
+
 ## 8. Outstanding issues and launch blockers
 
 Blockers (must be done before pilot):
@@ -85,9 +108,15 @@ Blockers (must be done before pilot):
 - At least one approved, signed-in tailor partner (section 4).
 - `RESEND_API_KEY` configured and one real email verified (section 5).
 - One supervised booking-to-delivery rehearsal completed (section 7).
+- At least one real delivery agent created with a login; agent rehearsal done (section 7b).
 
 Known limitations (acceptable for pilot, revisit after):
 - Assignment is admin-controlled by design; there is no auto-assignment.
+- Delivery dispatch is manual by design: no rider app tracking, no maps, no courier
+  integrations. Tasks are coordinated by phone by the admin.
+- Delivery fees are NOT invented: no delivery charge is created by the delivery
+  workflow; keep using the existing configurable pickup/delivery fee and confirm
+  real costs before charging.
 - Offer expiry governs acceptance only — an already-accepted order stays accepted
   (verified correct behavior).
 - Browser notifications for new bookings require the admin to have granted browser

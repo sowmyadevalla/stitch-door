@@ -19,6 +19,8 @@ import { Privacy } from '@/pages/Privacy';
 import { Terms } from '@/pages/Terms';
 import { JoinAsTailor } from '@/pages/JoinAsTailor';
 import { PartnerDashboard } from '@/pages/PartnerDashboard';
+import { AgentDashboard } from '@/pages/AgentDashboard';
+import { AgentLogin } from '@/pages/AgentLogin';
 import { AdminDashboard } from '@/pages/admin/AdminDashboard';
 import { AdminLogin } from '@/pages/admin/AdminLogin';
 
@@ -40,6 +42,12 @@ function Routes() {
   }
   if (segments[0] === 'partner') {
     return <PartnerDashboard />;
+  }
+  if (segments[0] === 'agent') {
+    return <AgentDashboard />;
+  }
+  if (segments[0] === 'agent-login') {
+    return <AgentLogin />;
   }
 
   // Public routes with navbar + footer

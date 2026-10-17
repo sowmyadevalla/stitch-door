@@ -6,3 +6,6 @@ verify_jwt = false
 
 [functions.partner-offer-notification]
 verify_jwt = false
+
+[functions.delivery-task-notification]
+verify_jwt = false

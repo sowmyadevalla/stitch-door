@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { LayoutDashboard, Scissors, Settings, LogOut, Loader2, ShieldAlert, Plus, Edit, Trash2, X, Download, ChevronRight, Bell, Clock, ClipboardList, UserPlus, RefreshCw, Users, XCircle, AlertTriangle, Send, PauseCircle, PlayCircle } from 'lucide-react';
+import { LayoutDashboard, Scissors, Settings, LogOut, Loader2, ShieldAlert, Plus, Edit, Trash2, X, Download, ChevronRight, Bell, Clock, ClipboardList, UserPlus, RefreshCw, Users, XCircle, AlertTriangle, Send, PauseCircle, PlayCircle, Truck } from 'lucide-react';
+import { DeliveryTab, DeliveryTeamSection, type DeliveryAgentRow, type DeliveryExceptionRow } from './DeliveryTab';
 import { useRouter } from '@/lib/router';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { STATUS_LABELS, STATUS_FLOW, PAYMENT_LABELS, formatINR } from '@/lib/constants';
 import { formatDateTime, formatDate, slugify } from '@/lib/utils';
-import type { Booking, Service, BusinessConfig, ServiceableArea, TailoringPartner, TailorApplication, TailorApplicationStatus, BookingStatus, PaymentStatus } from '@/lib/types';
+import type { Booking, BookingItem, BookingStatusHistory, Service, BusinessConfig, ServiceableArea, TailoringPartner, TailorApplication, TailorApplicationStatus, BookingStatus, PaymentStatus } from '@/lib/types';
 
 interface EligibilityRow {
   partner_id: string;
@@ -28,7 +29,7 @@ interface DeclineRow {
   responded_at: string;
 }
 
-type AdminTab = 'overview' | 'bookings' | 'applications' | 'services' | 'operations';
+type AdminTab = 'overview' | 'bookings' | 'applications' | 'delivery' | 'services' | 'operations';
 
 export function AdminDashboard() {
   const { session, isAdmin, loading, signOut } = useAuth();
@@ -49,7 +50,7 @@ export function AdminDashboard() {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'bookings' },
-        (payload: any) => {
+        (payload: { new: Booking }) => {
           const b = payload.new as Booking;
           setToast({ ref: b.booking_reference, name: b.customer_name });
 
@@ -93,6 +94,7 @@ export function AdminDashboard() {
     { key: 'overview', label: 'Overview', icon: LayoutDashboard },
     { key: 'bookings', label: 'Bookings', icon: Scissors },
     { key: 'applications', label: 'Applications', icon: ClipboardList },
+    { key: 'delivery', label: 'Delivery', icon: Truck },
     { key: 'services', label: 'Services', icon: Settings },
     { key: 'operations', label: 'Operations', icon: Settings },
   ];
@@ -154,11 +156,47 @@ export function AdminDashboard() {
             {tab === 'overview' && <OverviewTab />}
             {tab === 'bookings' && <BookingsTab />}
             {tab === 'applications' && <ApplicationsTab />}
+            {tab === 'delivery' && <DeliveryTabWrapper />}
             {tab === 'services' && <ServicesTab />}
             {tab === 'operations' && <OperationsTab />}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DeliveryTabWrapper() {
+  const [agents, setAgents] = useState<DeliveryAgentRow[]>([]);
+  const [exceptions, setExceptions] = useState<DeliveryExceptionRow[]>([]);
+
+  const loadAgents = useCallback(async () => {
+    const { data } = await supabase.rpc('admin_list_delivery_agents');
+    setAgents((data as unknown as DeliveryAgentRow[]) || []);
+  }, []);
+
+  const loadExceptions = useCallback(async () => {
+    const { data } = await supabase.rpc('admin_pending_delivery_exceptions');
+    setExceptions((data as unknown as DeliveryExceptionRow[]) || []);
+  }, []);
+
+  useEffect(() => { loadAgents(); loadExceptions(); }, [loadAgents, loadExceptions]);
+
+  // Surface failed/exception tasks on the overview strip; DeliveryTab shows its own copy.
+  return (
+    <div className="space-y-6">
+      {exceptions.length > 0 && (
+        <div className="animate-fade-in rounded-xl bg-amber-50 p-4">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-600" />
+            <p className="text-sm font-semibold text-amber-800">
+              {exceptions.length} delivery task{exceptions.length > 1 ? 's' : ''} failed or flagged — see the task list below.
+            </p>
+          </div>
+        </div>
+      )}
+      <DeliveryTab />
+      <DeliveryTeamSection agents={agents} onAgentsChanged={loadAgents} />
     </div>
   );
 }
@@ -332,8 +370,8 @@ function BookingsTab() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selected, setSelected] = useState<Booking | null>(null);
-  const [items, setItems] = useState<any[]>([]);
-  const [history, setHistory] = useState<any[]>([]);
+  const [items, setItems] = useState<BookingItem[]>([]);
+  const [history, setHistory] = useState<BookingStatusHistory[]>([]);
 
   async function loadBookings() {
     setLoading(true);
@@ -427,7 +465,7 @@ function BookingsTab() {
 function BookingDetailModal({
   booking, items, history, onClose, onUpdate,
 }: {
-  booking: Booking; items: any[]; history: any[];
+  booking: Booking; items: BookingItem[]; history: BookingStatusHistory[];
   onClose: () => void; onUpdate: () => void;
 }) {
   const [status, setStatus] = useState<BookingStatus>(booking.status);
@@ -468,7 +506,7 @@ function BookingDetailModal({
   async function saveChanges() {
     setSaving(true);
     setSaveMsg(null);
-    const updates: any = {
+    const updates: Record<string, string | number | null> = {
       status,
       payment_status: paymentStatus,
       admin_notes: adminNote,
@@ -534,7 +572,7 @@ function BookingDetailModal({
           <div className="mb-4">
             <h4 className="mb-2 text-sm font-semibold text-charcoal-700">Services</h4>
             <div className="space-y-2">
-              {items.map((item: any) => (
+              {items.map((item) => (
                 <div key={item.id} className="rounded-lg bg-ivory-200 p-3 text-sm">
                   <div className="flex justify-between">
                     <span className="font-medium">{item.service_name} × {item.quantity}</span>
@@ -608,7 +646,7 @@ function BookingDetailModal({
           <div className="mt-6">
             <h4 className="mb-2 text-sm font-semibold text-charcoal-700">Status History</h4>
             <div className="space-y-2">
-              {history.map((h: any) => (
+              {history.map((h) => (
                 <div key={h.id} className="rounded-lg bg-ivory-200 p-3 text-xs">
                   <div className="flex justify-between">
                     <span className="font-medium text-charcoal-700">{STATUS_LABELS[h.status as BookingStatus]}</span>
