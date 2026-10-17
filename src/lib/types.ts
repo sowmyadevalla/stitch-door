@@ -106,7 +106,66 @@ export interface TailoringPartner {
   specialties: string;
   is_active: boolean;
   created_at: string;
+  auth_user_id: string | null;
+  is_accepting_orders: boolean;
+  partner_code: string | null;
 }
+
+export type TailorApplicationStatus =
+  | 'pending'
+  | 'under_review'
+  | 'more_info_required'
+  | 'approved'
+  | 'rejected';
+
+export interface TailorApplication {
+  id: string;
+  application_reference: string;
+  full_name: string;
+  mobile: string;
+  email: string;
+  locality: string;
+  service_areas: string;
+  experience_years: string;
+  services_offered: string;
+  equipment: string;
+  expected_rates: string;
+  portfolio_urls: string;
+  verification_id_type: string;
+  verification_id_number: string;
+  notes_from_tailor: string;
+  status: TailorApplicationStatus;
+  review_notes: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PartnerOfferStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
+
+export interface PartnerOffer {
+  id: string;
+  booking_id: string;
+  partner_id: string;
+  status: PartnerOfferStatus;
+  offered_at: string;
+  responded_at: string | null;
+}
+
+export interface PartnerActivity {
+  id: string;
+  actor: string | null;
+  action: string;
+  details: string;
+  created_at: string;
+}
+
+export type PartnerStage =
+  | 'picked_up'
+  | 'at_tailoring_partner'
+  | 'quality_check'
+  | 'ready_for_delivery';
 
 export type BookingStatus =
   | 'request_received'

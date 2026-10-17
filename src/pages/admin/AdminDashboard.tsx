@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, Scissors, Settings, LogOut, Loader2, ShieldAlert, Plus, Edit, Trash2, X, Download, ChevronRight, Bell, Clock } from 'lucide-react';
+import { LayoutDashboard, Scissors, Settings, LogOut, Loader2, ShieldAlert, Plus, Edit, Trash2, X, Download, ChevronRight, Bell, Clock, ClipboardList, UserPlus, RefreshCw } from 'lucide-react';
 import { useRouter } from '@/lib/router';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { STATUS_LABELS, STATUS_FLOW, PAYMENT_LABELS, formatINR } from '@/lib/constants';
 import { formatDateTime, formatDate, slugify } from '@/lib/utils';
-import type { Booking, Service, BusinessConfig, ServiceableArea, TailoringPartner, BookingStatus, PaymentStatus } from '@/lib/types';
+import type { Booking, Service, BusinessConfig, ServiceableArea, TailoringPartner, TailorApplication, TailorApplicationStatus, BookingStatus, PaymentStatus } from '@/lib/types';
 
-type AdminTab = 'overview' | 'bookings' | 'services' | 'operations';
+type AdminTab = 'overview' | 'bookings' | 'applications' | 'services' | 'operations';
 
 export function AdminDashboard() {
   const { session, isAdmin, loading, signOut } = useAuth();
@@ -71,6 +71,7 @@ export function AdminDashboard() {
   const tabs: { key: AdminTab; label: string; icon: typeof LayoutDashboard }[] = [
     { key: 'overview', label: 'Overview', icon: LayoutDashboard },
     { key: 'bookings', label: 'Bookings', icon: Scissors },
+    { key: 'applications', label: 'Applications', icon: ClipboardList },
     { key: 'services', label: 'Services', icon: Settings },
     { key: 'operations', label: 'Operations', icon: Settings },
   ];
@@ -131,6 +132,7 @@ export function AdminDashboard() {
           <div>
             {tab === 'overview' && <OverviewTab />}
             {tab === 'bookings' && <BookingsTab />}
+            {tab === 'applications' && <ApplicationsTab />}
             {tab === 'services' && <ServicesTab />}
             {tab === 'operations' && <OperationsTab />}
           </div>
@@ -299,7 +301,7 @@ function BookingsTab() {
 
   async function openBooking(booking: Booking) {
     setSelected(booking);
-    const [itemsRes, histRes, partnersRes] = await Promise.all([
+              const [itemsRes, histRes, partnersRes] = await Promise.all([
       supabase.from('booking_items').select('*').eq('booking_id', booking.id),
       supabase.from('booking_status_history').select('*').eq('booking_id', booking.id).order('created_at'),
       supabase.from('tailoring_partners').select('*').eq('is_active', true),
@@ -426,13 +428,24 @@ function BookingDetailModal({
       status,
       payment_status: paymentStatus,
       admin_notes: adminNote,
-      assigned_partner_id: partnerId || null,
     };
     if (confirmedAmount) updates.confirmed_amount = parseFloat(confirmedAmount);
     if (status === 'cancelled' && cancelReason) updates.cancellation_reason = cancelReason;
 
     const { error } = await supabase.from('bookings').update(updates).eq('id', booking.id);
     if (error) { setSaveMsg('Error: ' + error.message); setSaving(false); return; }
+
+    let assignMsg = '';
+    if ((partnerId || null) !== (booking.assigned_partner_id || null)) {
+      if (!partnerId) {
+        assignMsg = ' Removing a partner assignment is done from the partner\'s offer history — select a different partner instead.';
+      } else {
+        const { data: assignRes } = await supabase.rpc('admin_assign_booking', {
+          p_booking_id: booking.id, p_partner_id: partnerId, p_note: 'Assigned from booking detail',
+        });
+        if (assignRes?.error) assignMsg = ' Partner assignment failed: ' + assignRes.error + '.';
+      }
+    }
 
     if (status !== booking.status && historyNote) {
       await supabase.from('booking_status_history').insert({
@@ -444,7 +457,7 @@ function BookingDetailModal({
       });
     }
 
-    setSaveMsg('Saved successfully.');
+    setSaveMsg('Saved successfully.' + assignMsg);
     setSaving(false);
     onUpdate();
     setTimeout(() => setSaveMsg(null), 2000);
@@ -577,6 +590,257 @@ function BookingDetailModal({
               ))}
             </div>
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ApplicationsTab() {
+  const [applications, setApplications] = useState<TailorApplication[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<'all' | TailorApplicationStatus>('pending');
+  const [selected, setSelected] = useState<TailorApplication | null>(null);
+  const [partners, setPartners] = useState<TailoringPartner[]>([]);
+
+  async function load() {
+    setLoading(true);
+    let query = supabase.from('tailor_applications').select('*').order('created_at', { ascending: false });
+    if (statusFilter !== 'all') query = query.eq('status', statusFilter);
+    const { data } = await query.limit(100);
+    setApplications((data as TailorApplication[]) || []);
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, [statusFilter]);
+
+  useEffect(() => {
+    supabase.from('tailoring_partners').select('id, name').then(({ data }) => setPartners((data as TailoringPartner[]) || []));
+  }, []);
+
+  const APP_STATUS_STYLES: Record<TailorApplicationStatus, string> = {
+    pending: 'bg-terracotta-100 text-terracotta-700',
+    under_review: 'bg-yellow-100 text-yellow-700',
+    more_info_required: 'bg-blue-100 text-blue-700',
+    approved: 'bg-green-100 text-green-700',
+    rejected: 'bg-red-100 text-red-700',
+  };
+
+  const pendingCount = applications.filter((a) => a.status === 'pending').length;
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} className="input-field max-w-xs">
+          <option value="all">All applications</option>
+          <option value="pending">Pending ({pendingCount} shown)</option>
+          <option value="under_review">Under review</option>
+          <option value="more_info_required">More info required</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <button onClick={load} className="btn-secondary text-sm"><RefreshCw className="h-4 w-4" /> Refresh</button>
+      </div>
+
+      {loading ? (
+        <div className="py-12 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-forest-600" /></div>
+      ) : applications.length === 0 ? (
+        <div className="card p-12 text-center">
+          <ClipboardList className="mx-auto mb-3 h-10 w-10 text-charcoal-300" />
+          <p className="text-sm text-charcoal-500">No applications with this status.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {applications.map((a) => (
+            <button key={a.id} onClick={() => setSelected(a)} className="card flex w-full items-center justify-between p-4 text-left hover:shadow-elevated transition-all">
+              <div>
+                <p className="text-sm font-semibold text-forest-700">{a.application_reference}</p>
+                <p className="text-xs text-charcoal-500">{a.full_name} • {a.mobile} • {a.locality || 'No locality'}</p>
+                <p className="text-xs text-charcoal-400">{formatDateTime(a.created_at)}</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className={`rounded-full px-3 py-1 text-xs font-medium ${APP_STATUS_STYLES[a.status]}`}>{a.status.replace(/_/g, ' ')}</span>
+                <ChevronRight className="h-4 w-4 text-charcoal-400" />
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selected && (
+        <ApplicationReviewModal
+          application={selected}
+          partners={partners}
+          onClose={() => setSelected(null)}
+          onChanged={() => { setSelected(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ApplicationReviewModal({
+  application, partners, onClose, onChanged,
+}: {
+  application: TailorApplication; partners: TailoringPartner[];
+  onClose: () => void; onChanged: () => void;
+}) {
+  const [notes, setNotes] = useState(application.review_notes);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [onboarding, setOnboarding] = useState(false);
+  const [onboardEmail, setOnboardEmail] = useState(application.email || '');
+  const [onboardPassword, setOnboardPassword] = useState('');
+  const [activity, setActivity] = useState<{ id: string; action: string; details: string; created_at: string }[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc('partner_activity_list');
+      if (data) setActivity(data as { id: string; action: string; details: string; created_at: string }[]);
+    })();
+  }, []);
+
+  async function review(newStatus: TailorApplicationStatus) {
+    setSaving(true);
+    setMsg(null);
+    const { data } = await supabase.rpc('admin_review_application', {
+      p_app_id: application.id, p_new_status: newStatus, p_notes: notes,
+    });
+    setSaving(false);
+    if (data?.error) { setMsg('Error: ' + data.error); return; }
+    onChanged();
+  }
+
+  async function onboard() {
+    setMsg(null);
+    if (!onboardEmail || onboardPassword.length < 8) {
+      setMsg('Enter an email and a password of at least 8 characters.');
+      return;
+    }
+    setSaving(true);
+    const { data: createRes, error: createErr } = await supabase.auth.admin.createUser({
+      email: onboardEmail,
+      password: onboardPassword,
+      email_confirm: true,
+    });
+    if (createErr || !createRes?.user) {
+      setSaving(false);
+      setMsg('Could not create the login: ' + (createErr?.message || 'unknown error'));
+      return;
+    }
+    const { data: linkRes } = await supabase.rpc('link_partner_account', {
+      p_app_id: application.id, p_auth_user_id: createRes.user.id,
+    });
+    setSaving(false);
+    if (linkRes?.error) {
+      setMsg('Login created, but linking failed: ' + linkRes.error + '. Ask technical support to link partner ' + application.application_reference + '.');
+      return;
+    }
+    setOnboarding(false);
+    onChanged();
+  }
+
+  async function markOnboarded() {
+    // A partner was created outside this flow (e.g. already had a login); just close.
+    onChanged();
+  }
+
+  const linkedPartner = partners.find((p) => p.name === application.full_name);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-charcoal-900/50 p-4" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-ivory-50 p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-charcoal-900">Application {application.application_reference}</h3>
+            <p className="text-xs text-charcoal-400">Status: {application.status.replace(/_/g, ' ')}</p>
+          </div>
+          <button onClick={onClose} className="text-charcoal-400 hover:text-charcoal-600"><X className="h-5 w-5" /></button>
+        </div>
+
+        <div className="mb-4 grid gap-3 rounded-xl bg-ivory-200 p-4 text-sm sm:grid-cols-2">
+          <div><p className="text-xs text-charcoal-400">Name</p><p className="font-medium">{application.full_name}</p></div>
+          <div><p className="text-xs text-charcoal-400">Mobile</p><p className="font-medium">{application.mobile}</p></div>
+          <div><p className="text-xs text-charcoal-400">Email</p><p className="font-medium">{application.email || '—'}</p></div>
+          <div><p className="text-xs text-charcoal-400">Locality</p><p className="font-medium">{application.locality || '—'}</p></div>
+          <div><p className="text-xs text-charcoal-400">Service areas</p><p className="font-medium">{application.service_areas || '—'}</p></div>
+          <div><p className="text-xs text-charcoal-400">Experience</p><p className="font-medium">{application.experience_years || '—'}</p></div>
+          <div><p className="text-xs text-charcoal-400">Services offered</p><p className="font-medium">{application.services_offered || '—'}</p></div>
+          <div><p className="text-xs text-charcoal-400">Equipment</p><p className="font-medium">{application.equipment || '—'}</p></div>
+          <div><p className="text-xs text-charcoal-400">Expected rates</p><p className="font-medium">{application.expected_rates || '—'}</p></div>
+          <div><p className="text-xs text-charcoal-400">ID ({application.verification_id_type || 'n/a'})</p><p className="font-medium">{application.verification_id_number || '—'}</p></div>
+          {application.portfolio_urls && <div className="sm:col-span-2"><p className="text-xs text-charcoal-400">Portfolio</p><a href={application.portfolio_urls} target="_blank" rel="noopener noreferrer" className="font-medium text-forest-700 underline">{application.portfolio_urls}</a></div>}
+          {application.notes_from_tailor && <div className="sm:col-span-2"><p className="text-xs text-charcoal-400">Notes from tailor</p><p className="font-medium">{application.notes_from_tailor}</p></div>}
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="label-field">Internal review notes</label>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="input-field resize-none" placeholder="Notes for the team (saved with each review action)..." />
+          </div>
+
+          {msg && <p className={`text-sm ${msg.startsWith('Error') || msg.startsWith('Could not') || msg.startsWith('Login created') ? 'text-red-600' : 'text-forest-600'}`}>{msg}</p>}
+
+          {application.status === 'approved' && !linkedPartner && !onboarding && (
+            <div className="rounded-xl bg-forest-50 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-forest-700">
+                <UserPlus className="h-4 w-4" /> Onboard this tailor
+              </div>
+              <p className="mt-1 text-xs text-forest-600">
+                Creates a partner login and links it to this application. Share the password with the tailor over phone.
+              </p>
+              <button onClick={() => setOnboarding(true)} className="btn-primary mt-3 text-sm">Start onboarding</button>
+            </div>
+          )}
+
+          {application.status === 'approved' && linkedPartner && (
+            <div className="rounded-xl bg-green-50 p-4 text-sm text-green-700">
+              Partner account exists: <strong>{linkedPartner.name}</strong>{linkedPartner.partner_code ? ` (${linkedPartner.partner_code})` : ''}.
+              They can sign in and see their dashboard.
+            </div>
+          )}
+
+          {onboarding && (
+            <div className="space-y-3 rounded-xl bg-ivory-200 p-4">
+              <div><label className="label-field">Login email</label><input type="email" value={onboardEmail} onChange={(e) => setOnboardEmail(e.target.value)} className="input-field" /></div>
+              <div><label className="label-field">Temporary password (min 8 chars)</label><input type="text" value={onboardPassword} onChange={(e) => setOnboardPassword(e.target.value)} className="input-field" /></div>
+              <div className="flex gap-2">
+                <button onClick={onboard} disabled={saving} className="btn-primary text-sm">
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Create login &amp; link
+                </button>
+                <button onClick={() => setOnboarding(false)} className="btn-ghost text-sm">Cancel</button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => review('under_review')} disabled={saving} className="btn-secondary text-sm">Mark under review</button>
+            <button onClick={() => review('more_info_required')} disabled={saving} className="btn-secondary text-sm">Request more info</button>
+            <button onClick={() => review('approved')} disabled={saving} className="btn-primary text-sm">Approve</button>
+            <button onClick={() => review('rejected')} disabled={saving} className="btn-secondary text-sm !border-red-300 !text-red-700 hover:!bg-red-50">Reject</button>
+          </div>
+          <p className="text-xs text-charcoal-400">
+            Approving does not create an account automatically — use onboarding above to create the partner login.
+          </p>
+        </div>
+
+        {activity.length > 0 && (
+          <div className="mt-6">
+            <h4 className="mb-2 text-sm font-semibold text-charcoal-700">Audit trail (all partner activity)</h4>
+            <div className="max-h-40 space-y-1 overflow-y-auto">
+              {activity.slice(0, 20).map((a) => (
+                <div key={a.id} className="rounded-lg bg-ivory-200 p-2 text-xs">
+                  <span className="font-medium text-charcoal-700">{a.action.replace(/_/g, ' ')}</span>
+                  <span className="text-charcoal-400"> — {formatDateTime(a.created_at)}</span>
+                  {a.details && <p className="text-charcoal-500">{a.details}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {application.status === 'approved' && linkedPartner && (
+          <button onClick={markOnboarded} className="btn-ghost mt-4 w-full text-sm">Close</button>
         )}
       </div>
     </div>

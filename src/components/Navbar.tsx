@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Menu, X, Scissors, User } from 'lucide-react';
+import { Menu, X, Scissors, User, HandshakeIcon } from 'lucide-react';
 import { Link, useRouter } from '@/lib/router';
 import { useAuth } from '@/lib/auth';
 import { Logo } from './Logo';
@@ -55,6 +55,10 @@ export function Navbar() {
         </div>
 
         <div className="hidden items-center gap-3 lg:flex">
+          <Link to="/join-as-tailor" className="btn-ghost text-sm">
+            <HandshakeIcon className="h-4 w-4" />
+            Join as a Tailor
+          </Link>
           <Link to="/track" className="btn-ghost text-sm">
             Track Order
           </Link>
@@ -100,6 +104,9 @@ export function Navbar() {
                 {link.label}
               </Link>
             ))}
+            <Link to="/join-as-tailor" className="rounded-xl px-4 py-3 text-sm font-medium text-charcoal-600 hover:bg-ivory-200">
+              Join as a Tailor
+            </Link>
             <Link to="/track" className="rounded-xl px-4 py-3 text-sm font-medium text-charcoal-600 hover:bg-ivory-200">
               Track Order
             </Link>

@@ -41,6 +41,7 @@ export function Footer() {
               <li><Link to="/faqs" className="hover:text-ivory-50 transition-colors">FAQs</Link></li>
               <li><Link to="/contact" className="hover:text-ivory-50 transition-colors">Contact Us</Link></li>
               <li><Link to="/track" className="hover:text-ivory-50 transition-colors">Track Your Order</Link></li>
+              <li><Link to="/join-as-tailor" className="hover:text-ivory-50 transition-colors">Join as a Tailor</Link></li>
             </ul>
           </div>
 

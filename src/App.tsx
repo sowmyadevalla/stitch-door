@@ -17,6 +17,8 @@ import { FAQs } from '@/pages/FAQs';
 import { Contact } from '@/pages/Contact';
 import { Privacy } from '@/pages/Privacy';
 import { Terms } from '@/pages/Terms';
+import { JoinAsTailor } from '@/pages/JoinAsTailor';
+import { PartnerDashboard } from '@/pages/PartnerDashboard';
 import { AdminDashboard } from '@/pages/admin/AdminDashboard';
 import { AdminLogin } from '@/pages/admin/AdminLogin';
 
@@ -36,6 +38,9 @@ function Routes() {
   if (segments[0] === 'admin-login') {
     return <AdminLogin />;
   }
+  if (segments[0] === 'partner') {
+    return <PartnerDashboard />;
+  }
 
   // Public routes with navbar + footer
   let page: React.ReactNode;
@@ -52,6 +57,9 @@ function Routes() {
       break;
     case 'book':
       page = <Book preselectedSlug={params.get('service') || undefined} />;
+      break;
+    case 'join-as-tailor':
+      page = <JoinAsTailor />;
       break;
     case 'track':
       page = <Track />;
