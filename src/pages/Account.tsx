@@ -22,7 +22,7 @@ export function Account() {
       (async () => {
         const { data } = await supabase
           .from('bookings')
-          .select('*')
+          .select('id, booking_reference, status, estimated_total, confirmed_amount, created_at')
           .eq('user_id', session.user.id)
           .order('created_at', { ascending: false });
         if (data) setBookings(data as Booking[]);
