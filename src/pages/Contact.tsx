@@ -1,19 +1,27 @@
 import { useState } from 'react';
 import { Mail, Phone, Clock, MapPin, MessageCircle, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { useBusinessConfig } from '@/lib/config';
+import { validateIndianMobile } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 
 export function Contact() {
   const { config } = useBusinessConfig();
   const [form, setForm] = useState({ name: '', phone: '', message: '' });
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+  const [phoneError, setPhoneError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const phoneCheck = validateIndianMobile(form.phone);
+    if (!phoneCheck.valid) {
+      setPhoneError('Please enter a valid 10-digit Indian mobile number (e.g. 98765 43210).');
+      return;
+    }
+    setPhoneError(null);
     setStatus('submitting');
     const { error } = await supabase.from('contact_messages').insert({
       name: form.name.trim().slice(0, 120),
-      phone: form.phone.trim().slice(0, 32),
+      phone: phoneCheck.normalized,
       message: form.message.trim().slice(0, 5000),
     });
     if (error) {
@@ -116,7 +124,8 @@ export function Contact() {
                 </div>
                 <div>
                   <label className="label-field">Phone Number *</label>
-                  <input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="input-field" required />
+                  <input type="tel" inputMode="numeric" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="input-field" placeholder="10-digit mobile number" required />
+                  {phoneError && <p className="mt-1 text-xs text-terracotta-600">{phoneError}</p>}
                 </div>
                 <div>
                   <label className="label-field">Message *</label>

@@ -635,16 +635,30 @@ function BookingDetailModal({
   async function saveChanges() {
     setSaving(true);
     setSaveMsg(null);
+    const amountTrim = confirmedAmount.trim();
+    let parsedAmount: number | null = null;
+    if (amountTrim) {
+      parsedAmount = parseFloat(amountTrim);
+      if (Number.isNaN(parsedAmount) || parsedAmount < 0) {
+        setSaveMsg('Error: Enter a valid amount (e.g. 1250).');
+        setSaving(false);
+        return;
+      }
+    }
     const updates: Record<string, string | number | null> = {
       status,
       payment_status: paymentStatus,
       admin_notes: adminNote,
     };
-    if (confirmedAmount) updates.confirmed_amount = parseFloat(confirmedAmount);
+    if (parsedAmount !== null) updates.confirmed_amount = parsedAmount;
     if (status === 'cancelled' && cancelReason) updates.cancellation_reason = cancelReason;
 
     const { error } = await supabase.from('bookings').update(updates).eq('id', booking.id);
-    if (error) { setSaveMsg('Error: ' + error.message); setSaving(false); return; }
+    if (error) {
+      setSaveMsg('Error: ' + error.message + ' — your input is kept, please try again.');
+      setSaving(false);
+      return;
+    }
 
     if (status !== booking.status && historyNote) {
       await supabase.from('booking_status_history').insert({
@@ -656,6 +670,15 @@ function BookingDetailModal({
       });
     }
 
+    // Reload the saved row from the database and display what was actually stored
+    const { data: saved } = await supabase
+      .from('bookings')
+      .select('confirmed_amount, status, payment_status')
+      .eq('id', booking.id)
+      .maybeSingle();
+    if (saved) {
+      setConfirmedAmount(saved.confirmed_amount !== null ? String(saved.confirmed_amount) : '');
+    }
     setSaveMsg('Saved successfully.');
     setSaving(false);
     onUpdate();

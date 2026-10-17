@@ -67,16 +67,16 @@ export function Track() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Auto-track returning visitors who booked earlier on this device
+  // Auto-track when arriving with ?ref=XXXX (e.g. from the booking confirmation)
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const refParam = params.get('ref');
-    const target = refParam?.trim().toUpperCase() || (ref ? ref.trim().toUpperCase() : '');
-    if (!target) return;
-    const stored = getStoredTokens()[target];
+    const hashQuery = window.location.hash.split('?')[1] || '';
+    const params = new URLSearchParams(hashQuery);
+    const refParam = params.get('ref')?.trim().toUpperCase() || '';
+    if (!refParam) return;
+    const stored = getStoredTokens()[refParam];
     if (stored?.token) {
-      setRef(target);
-      doTrack(target, '', true);
+      setRef(refParam);
+      doTrack(refParam, '', true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

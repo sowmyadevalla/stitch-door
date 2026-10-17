@@ -1,3 +1,5 @@
+import { PICKUP_WINDOWS } from './constants';
+
 export function validateIndianMobile(input: string): { valid: boolean; normalized: string } {
   let phone = input.replace(/\s|-/g, '');
   if (phone.startsWith('+91')) phone = phone.slice(3);
@@ -35,4 +37,45 @@ export function slugify(text: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+const WINDOW_END_MINUTES: Record<string, number> = {
+  '9 AM – 11 AM': 11 * 60,
+  '11 AM – 1 PM': 13 * 60,
+  '1 PM – 3 PM': 15 * 60,
+  '3 PM – 5 PM': 17 * 60,
+  '5 PM – 7 PM': 19 * 60,
+};
+
+// Current date/time in the business timezone (Asia/Kolkata)
+export function istNow(): { date: string; minutes: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (type: string) => parts.find((p) => p.type === type)?.value || '';
+  const hour = parseInt(get('hour'), 10) % 24;
+  const minute = parseInt(get('minute'), 10);
+  return {
+    date: `${get('year')}-${get('month')}-${get('day')}`,
+    minutes: hour * 60 + minute,
+  };
+}
+
+export function isWindowInPast(dateStr: string, windowLabel: string): boolean {
+  const now = istNow();
+  if (dateStr < now.date) return true;
+  if (dateStr > now.date) return false;
+  const end = WINDOW_END_MINUTES[windowLabel];
+  if (end === undefined) return false;
+  return end <= now.minutes;
+}
+
+export function availableWindows(dateStr: string): string[] {
+  return PICKUP_WINDOWS.filter((w) => !isWindowInPast(dateStr, w));
 }

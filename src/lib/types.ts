@@ -183,9 +183,14 @@ export type BookingStatus =
 
 export type PaymentStatus = 'pending' | 'partial' | 'paid' | 'refunded';
 
+export type MeasurementMode = 'enter_now' | 'home_visit' | 'at_pickup';
+
 export interface CartItem {
   service: Service;
   quantity: number;
   garment_notes: string;
   answers: Record<string, string>;
+  measurement_mode: MeasurementMode;
+  measurements: Record<string, string>;
+  visit_preference: string;
 }
