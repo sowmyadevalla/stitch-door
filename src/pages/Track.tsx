@@ -66,17 +66,26 @@ export function Track() {
   const [history, setHistory] = useState<BookingStatusHistory[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedRefs, setSavedRefs] = useState<string[]>([]);
 
   // Auto-track when arriving with ?ref=XXXX (e.g. from the booking confirmation)
+  // or show saved orders for one-tap tracking
   useEffect(() => {
     const hashQuery = window.location.hash.split('?')[1] || '';
     const params = new URLSearchParams(hashQuery);
     const refParam = params.get('ref')?.trim().toUpperCase() || '';
-    if (!refParam) return;
-    const stored = getStoredTokens()[refParam];
-    if (stored?.token) {
+    const tokens = getStoredTokens();
+    const savedRefs = Object.keys(tokens)
+      .filter((k) => tokens[k]?.token)
+      .sort((a, b) => (tokens[b].savedAt || 0) - (tokens[a].savedAt || 0));
+    setSavedRefs(savedRefs);
+    if (refParam) {
       setRef(refParam);
       doTrack(refParam, '', true);
+    } else if (savedRefs.length === 1) {
+      // Only one order on this device: open it straight away
+      setRef(savedRefs[0]);
+      doTrack(savedRefs[0], '', true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -89,13 +98,13 @@ export function Track() {
     setHistory([]);
 
     const stored = getStoredTokens()[refValue];
-    const last4 = useToken && stored?.token
-      ? ''
-      : phoneValue.trim().replace(/\D/g, '').slice(-4);
+    const token = stored?.token || '';
+    const last4 = useToken && token ? '' : phoneValue.trim().replace(/\D/g, '').slice(-4);
 
     const { data, error: rpcError } = await supabase.rpc('track_booking', {
       p_ref: refValue,
       p_last4: last4,
+      p_token: token,
     });
 
     if (rpcError) {
@@ -157,6 +166,36 @@ export function Track() {
       </section>
 
       <section className="mx-auto max-w-3xl px-4 py-12 lg:px-8">
+        {/* Saved orders: one tap, no ID or phone needed */}
+        {savedRefs.length > 0 && !booking && (
+          <div className="card mb-6 p-6">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-charcoal-500">
+              {savedRefs.length === 1 ? 'Your recent order' : `Your orders (${savedRefs.length})`}
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {savedRefs.map((savedRef) => (
+                <button
+                  key={savedRef}
+                  onClick={() => {
+                    setRef(savedRef);
+                    doTrack(savedRef, '', true);
+                  }}
+                  disabled={loading}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                    ref === savedRef && loading
+                      ? 'bg-forest-600 text-ivory-50'
+                      : 'bg-forest-100 text-forest-700 hover:bg-forest-200'
+                  }`}
+                >
+                  {savedRef}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-charcoal-400">
+              Saved on this device — tap to check status instantly. Booked on another device? Use the form below.
+            </p>
+          </div>
+        )}
         <form onSubmit={handleSearch} className="card mb-8 p-6">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
